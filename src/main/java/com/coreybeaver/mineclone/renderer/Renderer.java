@@ -2,7 +2,9 @@ package com.coreybeaver.mineclone.renderer;
 
 import org.joml.Vector3f;
 
+
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL30.*;
 
 public class Renderer {
     public static void Clear() {
@@ -14,5 +16,10 @@ public class Renderer {
         color = color.normalize();
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(color.x, color.y, color.z, 1.0f);
+    }
+
+    public static void DrawIndexed(VertexArray va) {
+        va.Bind();
+        glDrawElements(GL_TRIANGLES, va.GetIndexCount(), GL_UNSIGNED_INT, 0);
     }
 }
