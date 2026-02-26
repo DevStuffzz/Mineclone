@@ -3,7 +3,9 @@ package com.coreybeaver.mineclone.renderer;
 import org.joml.*;
 import org.lwjgl.system.MemoryStack;
 
+import java.io.InputStream;
 import java.nio.FloatBuffer;
+import java.nio.charset.StandardCharsets;
 
 import static org.lwjgl.opengl.GL20.*;
 
@@ -13,11 +15,50 @@ public class Shader {
     private String vertexSrc;
     private String fragmentSrc;
 
+    public Shader(String url) {
+        String vertexSrc = "";
+        String fragmentSrc = "";
+
+        try {
+            InputStream in = getClass().getClassLoader().getResourceAsStream("assets/shaders/default.glsl");
+            if (in == null) throw new RuntimeException("Shader file not found");
+            String source = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+
+            // Split shader source by "#type" marker
+            String[] split = source.split("#type");
+            for (String s : split) {
+                s = s.trim();
+                if (s.isEmpty()) continue;
+
+                int eol = s.indexOf("\n");
+                if (eol == -1) continue;
+
+                String type = s.substring(0, eol).trim();
+                String code = s.substring(eol + 1).trim();
+
+                if (type.equals("vertex")) vertexSrc = code;
+                else if (type.equals("fragment")) fragmentSrc = code;
+            }
+
+        } catch (java.io.IOException e) {
+            e.printStackTrace();
+        }
+
+        // Call the main constructor
+        Init(vertexSrc, fragmentSrc);
+    }
+
+
     public Shader(String vertexSrc, String fragSrc) {
+        Init(vertexSrc, fragSrc);
+    }
+
+    private void Init(String vertexSrc, String fragSrc) {
         this.vertexSrc = vertexSrc;
         this.fragmentSrc = fragSrc;
         Compile();
     }
+
 
     private void Compile() {
         int vertexShader = glCreateShader(GL_VERTEX_SHADER);

@@ -1,59 +1,38 @@
 package com.coreybeaver.mineclone.scene;
 
+import com.coreybeaver.mineclone.assetmanager.AssetManager;
 import com.coreybeaver.mineclone.renderer.*;
 import org.joml.Matrix4f;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.lwjgl.opengl.GL11.*;
 
 public class Scene {
 
-    private Shader shader;
-    private VertexArray quad;
+    private Shader defaultShader;
 
     public Camera camera;
 
-    public Scene() {
+    private List<Mesh> meshes;
 
+    public Scene() {
+        meshes = new ArrayList<>();
         camera = new Camera(1920, 1080);
 
-        // =========================
-        // SHADER
-        // =========================
-
-        String vertexSrc = """
-                #version 330 core
-                
-                layout(location = 0) in vec3 aPos;
-                
-                uniform mat4 u_MVP;
-                
-                void main()
-                {
-                    gl_Position = u_MVP * vec4(aPos, 1.0);
-                }
-                """;
-
-        String fragmentSrc = """
-                #version 330 core
-                out vec4 FragColor;
-                void main()
-                {
-                    FragColor = vec4(0.2, 0.7, 0.3, 1.0);
-                }
-                """;
-
-        shader = new Shader(vertexSrc, fragmentSrc);
+        defaultShader = AssetManager.GetShader("assets/shaders/defualt.glsl");
 
         // =========================
         // QUAD DATA
         // =========================
 
         float[] vertices = {
-                // positions
-                -0.5f, -0.5f, 0.0f,
-                0.5f, -0.5f, 0.0f,
-                0.5f,  0.5f, 0.0f,
-                -0.5f,  0.5f, 0.0f
+                // positions        // uvs
+                -0.5f, -0.5f, 0.0f,  0.0f, 0.0f, // bottom-left
+                0.5f, -0.5f, 0.0f,  1.0f, 0.0f, // bottom-right
+                0.5f,  0.5f, 0.0f,  1.0f, 1.0f, // top-right
+                -0.5f,  0.5f, 0.0f,  0.0f, 1.0f  // top-left
         };
 
         int[] indices = {
@@ -62,30 +41,44 @@ public class Scene {
         };
 
         BufferLayoutElement[] layout = new BufferLayoutElement[] {
-                new BufferLayoutElement(GL_FLOAT, 3, false)
+                new BufferLayoutElement(GL_FLOAT, 3, false), // position
+                new BufferLayoutElement(GL_FLOAT, 2, false)  // uv
         };
 
-        quad = new VertexArray(vertices, indices, layout);
-        quad.getPosition().z = -2.0f;
+        Texture grass = AssetManager.GetTexture("assets/images/test.jpg");
+        VertexArray quad = new VertexArray(vertices, indices, layout);
+
+        Mesh block = new Mesh(quad, grass);
+
+        meshes.add(block);
 
     }
 
     public void Update(float deltaTime) {
-
         Renderer.Clear();
 
         // Update camera movement
         camera.Update(deltaTime);
 
-        // Compute MVP for object
-        Matrix4f mvp = new Matrix4f()
-                .set(camera.getProjection())
-                .mul(camera.getView())
-                .mul(quad.getModelMatrix());
+        for (Mesh mesh : meshes) {
+            VertexArray vao = mesh.getVao();
+            Texture tex = mesh.getTexture();
 
-        shader.Bind();
-        shader.UniformMat4("u_MVP", mvp);
+            Matrix4f mvp = new Matrix4f()
+                    .set(camera.getProjection())
+                    .mul(camera.getView())
+                    .mul(vao.getModelMatrix());
 
-        Renderer.DrawIndexed(quad);
+            defaultShader.Bind();
+
+            if (tex != null) {
+                tex.Bind(0);
+                defaultShader.UniformTexture2D("u_Texture", 0);
+            }
+
+            defaultShader.UniformMat4("u_MVP", mvp);
+
+            Renderer.DrawIndexed(vao);
+        }
     }
 }
