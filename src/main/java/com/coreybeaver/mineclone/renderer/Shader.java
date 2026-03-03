@@ -20,8 +20,8 @@ public class Shader {
         String fragmentSrc = "";
 
         try {
-            InputStream in = getClass().getClassLoader().getResourceAsStream("assets/shaders/default.glsl");
-            if (in == null) throw new RuntimeException("Shader file not found");
+            InputStream in = getClass().getClassLoader().getResourceAsStream(url);
+            if (in == null) throw new RuntimeException("Shader file not found: " + url);
             String source = new String(in.readAllBytes(), StandardCharsets.UTF_8);
 
             // Split shader source by "#type" marker

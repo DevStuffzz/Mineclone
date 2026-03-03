@@ -1,6 +1,7 @@
 package com.coreybeaver.mineclone.io;
 
 import org.lwjgl.opengl.GL;
+import org.lwjgl.opengl.GL11;
 
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.system.MemoryUtil.NULL;
@@ -44,7 +45,8 @@ public class Window {
 
         glfwMakeContextCurrent(glfwWindow);
         GL.createCapabilities();
-
+        // enable depth testing (was mistakenly using the clear mask)
+        GL11.glEnable(GL11.GL_DEPTH_TEST);
         Input.init(glfwWindow);
 
         glfwShowWindow(glfwWindow);

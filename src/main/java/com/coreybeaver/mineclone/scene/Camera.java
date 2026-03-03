@@ -24,6 +24,19 @@ public class Camera {
         updateView();
     }
 
+    // Sets the camera's world position
+    public void setPosition(float x, float y, float z) {
+        position.set(x, y, z);
+    }
+
+    // Points the camera at a target in world space
+    public void lookAt(float targetX, float targetY, float targetZ) {
+        Vector3f dir = new Vector3f(targetX, targetY, targetZ).sub(position).normalize();
+        // Compute rotation angles from the direction vector
+        rotation.x = (float) Math.asin(dir.y); // pitch
+        rotation.y = (float) Math.atan2(dir.x, dir.z); // yaw
+    }
+
     private void updateView() {
 
         Vector3f direction = new Vector3f(
