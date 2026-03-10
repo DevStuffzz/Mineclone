@@ -92,8 +92,12 @@ public class World {
             // Propagate light from sources in this new chunk
             propagateLightForChunk(next.x, next.z);
 
+            // Propagate sky light for this chunk
+            propagateSkyLightForChunk(next.x, next.z);
+
             // Spread light from neighboring chunks into the new chunk
             spreadLightFromNeighbors(next.x, next.z);
+            spreadSkyLightFromNeighbors(next.x, next.z);
         }
 
         Iterator<ColumnPos> it = columns.keySet().iterator();
@@ -337,6 +341,251 @@ public class World {
         }
 
         // Rebuild meshes for all affected chunks immediately
+        for (ColumnPos pos : affectedChunks) {
+            Chunk chunk = columns.get(pos);
+            if (chunk != null) {
+                chunk.invalidateMeshes();
+            }
+        }
+    }
+
+    // Sky light propagation - treat surface blocks (blocks with only air above) as light sources
+    private void propagateSkyLightForChunk(int chunkX, int chunkZ) {
+        ColumnPos pos = new ColumnPos(chunkX, chunkZ);
+        Chunk chunk = columns.get(pos);
+        if (chunk == null) return;
+
+        // Find all surface blocks (blocks with only air above them)
+        for (int x = 0; x < Chunk.WIDTH; x++) {
+            for (int z = 0; z < Chunk.DEPTH; z++) {
+                // Find the highest non-air block in this column
+                for (int y = Chunk.HEIGHT - 1; y >= 0; y--) {
+                    int blockId = chunk.getBlock(x, y, z);
+                    Block block = BlockManager.Get().GetBlock(blockId);
+
+                    // Skip air and non-solid blocks
+                    if (blockId == 0 || (block != null && block.type != BlockType.SOLID)) {
+                        continue;
+                    }
+
+                    // Found a solid block - check if there's only air above
+                    boolean isSurface = true;
+                    for (int checkY = y + 1; checkY < Chunk.HEIGHT; checkY++) {
+                        int aboveId = chunk.getBlock(x, checkY, z);
+                        Block aboveBlock = BlockManager.Get().GetBlock(aboveId);
+                        // If there's any solid block above, this isn't a surface block
+                        if (aboveBlock != null && aboveBlock.type == BlockType.SOLID) {
+                            isSurface = false;
+                            break;
+                        }
+                    }
+
+                    // If this is a surface block, propagate skylight from it
+                    if (isSurface) {
+                        int worldX = chunkX * Chunk.WIDTH + x;
+                        int worldZ = chunkZ * Chunk.DEPTH + z;
+                        propagateSkyLight(worldX, y, worldZ, 15);
+                    }
+
+                    // Only check the highest solid block in each column
+                    break;
+                }
+            }
+        }
+    }
+
+    public void propagateSkyLight(int worldX, int y, int worldZ, int initialLight) {
+        if (initialLight <= 0) return;
+
+        Set<ColumnPos> affectedChunks = new HashSet<>();
+
+        class LightNode {
+            final int x, y, z;
+            final int light;
+            LightNode(int x, int y, int z, int light) {
+                this.x = x; this.y = y; this.z = z; this.light = light;
+            }
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (!(o instanceof LightNode)) return false;
+                LightNode that = (LightNode) o;
+                return x == that.x && y == that.y && z == that.z;
+            }
+            @Override
+            public int hashCode() {
+                return ((x * 31 + y) * 31 + z);
+            }
+        }
+
+        Queue<LightNode> queue = new ArrayDeque<>();
+        Set<LightNode> visited = new HashSet<>();
+
+        queue.add(new LightNode(worldX, y, worldZ, initialLight));
+        visited.add(new LightNode(worldX, y, worldZ, 0));
+
+        int[][] directions = {
+            {1, 0, 0}, {-1, 0, 0},
+            {0, 1, 0}, {0, -1, 0},
+            {0, 0, 1}, {0, 0, -1}
+        };
+
+        while (!queue.isEmpty()) {
+            LightNode node = queue.poll();
+            int lx = node.x, ly = node.y, lz = node.z, level = node.light;
+
+            if (ly < 0 || ly >= Chunk.HEIGHT) continue;
+
+            int cx = Math.floorDiv(lx, Chunk.WIDTH);
+            int cz = Math.floorDiv(lz, Chunk.DEPTH);
+            int localX = lx - cx * Chunk.WIDTH;
+            int localZ = lz - cz * Chunk.DEPTH;
+
+            ColumnPos colPos = new ColumnPos(cx, cz);
+            Chunk chunk = columns.get(colPos);
+            if (chunk == null) continue;
+
+            int currentLight = chunk.getSkyLight(localX, ly, localZ) & 0xFF;
+            if (currentLight >= level) continue;
+
+            chunk.setSkyLight(localX, ly, localZ, (byte) level);
+            affectedChunks.add(colPos);
+
+            // Spread to neighbors
+            int nextLevel = level - 1;
+            if (nextLevel <= 0) continue;
+
+            for (int[] dir : directions) {
+                int nx = lx + dir[0];
+                int ny = ly + dir[1];
+                int nz = lz + dir[2];
+
+                int ncx = Math.floorDiv(nx, Chunk.WIDTH);
+                int ncz = Math.floorDiv(nz, Chunk.DEPTH);
+                Chunk neighborChunk = columns.get(new ColumnPos(ncx, ncz));
+                if (neighborChunk == null) continue;
+
+                int localNX = nx - ncx * Chunk.WIDTH;
+                int localNZ = nz - ncz * Chunk.DEPTH;
+
+                int neighborBlockId = neighborChunk.getBlock(localNX, ny, localNZ);
+                Block neighborBlock = BlockManager.Get().GetBlock(neighborBlockId);
+                if (neighborBlock != null && neighborBlock.type == BlockType.SOLID) continue;
+
+                LightNode nextNode = new LightNode(nx, ny, nz, nextLevel);
+                if (!visited.contains(nextNode)) {
+                    queue.add(nextNode);
+                    visited.add(nextNode);
+                }
+            }
+        }
+
+        // Rebuild meshes for all affected chunks
+        for (ColumnPos pos : affectedChunks) {
+            Chunk chunk = columns.get(pos);
+            if (chunk != null) {
+                chunk.invalidateMeshes();
+            }
+        }
+    }
+
+    private void spreadSkyLightFromNeighbors(int chunkX, int chunkZ) {
+        ColumnPos pos = new ColumnPos(chunkX, chunkZ);
+        Chunk chunk = columns.get(pos);
+        if (chunk == null) return;
+
+        // Check all edge blocks of the new chunk and spread sky light from neighbors
+        for (int y = 0; y < Chunk.HEIGHT; y++) {
+            for (int x = 0; x < Chunk.WIDTH; x++) {
+                checkAndSpreadSkyLightFromNeighbor(chunkX, chunkZ, x, y, 0, 0, 0, -1);
+                checkAndSpreadSkyLightFromNeighbor(chunkX, chunkZ, x, y, Chunk.DEPTH - 1, 0, 0, 1);
+            }
+            for (int z = 0; z < Chunk.DEPTH; z++) {
+                checkAndSpreadSkyLightFromNeighbor(chunkX, chunkZ, 0, y, z, -1, 0, 0);
+                checkAndSpreadSkyLightFromNeighbor(chunkX, chunkZ, Chunk.WIDTH - 1, y, z, 1, 0, 0);
+            }
+        }
+    }
+
+    private void checkAndSpreadSkyLightFromNeighbor(int chunkX, int chunkZ, int localX, int y, int localZ, int dx, int dy, int dz) {
+        int worldX = chunkX * Chunk.WIDTH + localX;
+        int worldZ = chunkZ * Chunk.DEPTH + localZ;
+
+        int neighborWorldX = worldX + dx;
+        int neighborWorldY = y + dy;
+        int neighborWorldZ = worldZ + dz;
+
+        byte neighborLight = getSkyLightAt(neighborWorldX, neighborWorldY, neighborWorldZ);
+        if (neighborLight > 1) {
+            int newLight = (neighborLight & 0xFF) - 1;
+            if (newLight <= 0) return;
+
+            ColumnPos pos = new ColumnPos(chunkX, chunkZ);
+            Chunk chunk = columns.get(pos);
+            if (chunk == null) return;
+
+            int currentLight = chunk.getSkyLight(localX, y, localZ) & 0xFF;
+            if (currentLight >= newLight) return;
+
+            chunk.setSkyLight(localX, y, localZ, (byte) newLight);
+            spreadSkyLightIntoChunk(worldX, y, worldZ, newLight);
+        }
+    }
+
+    private void spreadSkyLightIntoChunk(int worldX, int y, int worldZ, int lightLevel) {
+        Queue<int[]> queue = new ArrayDeque<>();
+        Set<Long> visited = new HashSet<>();
+        Set<ColumnPos> affectedChunks = new HashSet<>();
+
+        queue.add(new int[]{worldX, y, worldZ, lightLevel});
+        visited.add(((long)worldX << 32) | ((long)y << 16) | (long)worldZ);
+
+        int[][] directions = {
+            {1, 0, 0}, {-1, 0, 0},
+            {0, 1, 0}, {0, -1, 0},
+            {0, 0, 1}, {0, 0, -1}
+        };
+
+        while (!queue.isEmpty()) {
+            int[] node = queue.poll();
+            int x = node[0], ny = node[1], z = node[2], level = node[3];
+
+            int nextLevel = level - 1;
+            if (nextLevel <= 0) continue;
+
+            for (int[] dir : directions) {
+                int nx = x + dir[0];
+                int ny2 = ny + dir[1];
+                int nz = z + dir[2];
+
+                if (ny2 < 0 || ny2 >= Chunk.HEIGHT) continue;
+
+                long key = ((long)nx << 32) | ((long)ny2 << 16) | (long)nz;
+                if (visited.contains(key)) continue;
+
+                int ncx = Math.floorDiv(nx, Chunk.WIDTH);
+                int ncz = Math.floorDiv(nz, Chunk.DEPTH);
+                ColumnPos npos = new ColumnPos(ncx, ncz);
+                Chunk nchunk = columns.get(npos);
+                if (nchunk == null) continue;
+
+                int localNX = nx - ncx * Chunk.WIDTH;
+                int localNZ = nz - ncz * Chunk.DEPTH;
+
+                int blockId = nchunk.getBlock(localNX, ny2, localNZ);
+                Block block = BlockManager.Get().GetBlock(blockId);
+                if (block != null && block.type == BlockType.SOLID) continue;
+
+                int currentLight = nchunk.getSkyLight(localNX, ny2, localNZ) & 0xFF;
+                if (currentLight >= nextLevel) continue;
+
+                nchunk.setSkyLight(localNX, ny2, localNZ, (byte) nextLevel);
+                affectedChunks.add(npos);
+                visited.add(key);
+                queue.add(new int[]{nx, ny2, nz, nextLevel});
+            }
+        }
+
         for (ColumnPos pos : affectedChunks) {
             Chunk chunk = columns.get(pos);
             if (chunk != null) {

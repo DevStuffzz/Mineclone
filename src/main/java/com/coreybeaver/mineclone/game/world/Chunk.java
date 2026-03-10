@@ -155,34 +155,51 @@ public class Chunk {
     }
 
 
-    // Calculate lighting for a face by sampling the neighbor's light OR current block
-    private float calculateFaceLighting(int x, int y, int z, int[] offset) {
+    // Calculate lighting for a face by sampling from the neighbor block (where the face is exposed)
+    // The face should be lit by the light in the empty space, not the solid block
+    // Returns array: [blockLight, skyLight]
+    private float[] calculateFaceLighting(int x, int y, int z, int[] offset) {
         int nx = x + offset[0];
         int ny = y + offset[1];
         int nz = z + offset[2];
 
-        int neighborLight = 0;
-        int currentLight = blockLight[x][y][z] & 0xFF; // Sample current block's light
+        // Sample the neighbor (where the face is exposed to)
+        int neighborBlockLight = 0;
+        int neighborSkyLight = 0;
 
-        // If neighbor is in bounds, sample directly from chunk
         if (inBounds(nx, ny, nz)) {
-            neighborLight = blockLight[nx][ny][nz] & 0xFF;
+            neighborBlockLight = blockLight[nx][ny][nz] & 0xFF;
+            neighborSkyLight = skyLight[nx][ny][nz] & 0xFF;
         } else {
             // Neighbor is out of chunk bounds, query world
-            int worldX = (int)posX + x + offset[0];
-            int worldY = y + offset[1];
-            int worldZ = (int)posZ + z + offset[2];
+            int worldX = (int)posX + nx;
+            int worldY = ny;
+            int worldZ = (int)posZ + nz;
 
             if (world != null) {
-                neighborLight = world.getBlockLightAt(worldX, worldY, worldZ) & 0xFF;
+                // Check if there's a block at the neighbor position
+                int neighborBlockId = world.getBlockAt(worldX, worldY, worldZ);
+
+                if (neighborBlockId == 0) {
+                    // Neighbor is air - if we can't get lighting data (chunk not loaded),
+                    // assume it's exposed to sky for a reasonable default
+                    neighborBlockLight = world.getBlockLightAt(worldX, worldY, worldZ) & 0xFF;
+                    neighborSkyLight = world.getSkyLightAt(worldX, worldY, worldZ) & 0xFF;
+
+                    // If both are 0, the chunk likely isn't loaded yet - assume skylight
+                    if (neighborBlockLight == 0 && neighborSkyLight == 0) {
+                        neighborSkyLight = 15;
+                    }
+                } else {
+                    // Neighbor is solid - get its light values
+                    neighborBlockLight = world.getBlockLightAt(worldX, worldY, worldZ) & 0xFF;
+                    neighborSkyLight = world.getSkyLightAt(worldX, worldY, worldZ) & 0xFF;
+                }
             }
         }
 
-        // Take the max of current block and neighbor
-        int lightLevel = Math.max(currentLight, neighborLight);
-
-        // Normalize to 0.0-1.0, no ambient
-        return lightLevel / 15.0f;
+        // Normalize to 0.0-1.0
+        return new float[]{neighborBlockLight / 15.0f, neighborSkyLight / 15.0f};
     }
 
     public byte getSkyLight(int x, int y, int z) {
@@ -284,9 +301,10 @@ public class Chunk {
         for (int i = 0; i < idx.size(); i++) idxArray[i] = idx.get(i);
 
         BufferLayoutElement[] layout = new BufferLayoutElement[]{
-                new BufferLayoutElement(GL_FLOAT,3,false),
-                new BufferLayoutElement(GL_FLOAT,2,false),
-                new BufferLayoutElement(GL_FLOAT,1,false)
+                new BufferLayoutElement(GL_FLOAT,3,false),  // position
+                new BufferLayoutElement(GL_FLOAT,2,false),  // texCoord
+                new BufferLayoutElement(GL_FLOAT,1,false),  // blockLight
+                new BufferLayoutElement(GL_FLOAT,1,false)   // skyLight
         };
 
         VertexArray vao = new VertexArray(array, idxArray, layout);
@@ -303,7 +321,9 @@ public class Chunk {
         float[] uvs = AtlasUtils.getUVs(texIndex, atlasSize, texSize);
 
         // Sample light from the neighboring block (where the face points)
-        float light = calculateFaceLighting(x, y, z, faceOffset);
+        float[] lighting = calculateFaceLighting(x, y, z, faceOffset);
+        float blockLight = lighting[0];
+        float skyLight = lighting[1];
 
         for (int i = 0; i < 4; i++) {
 
@@ -314,7 +334,8 @@ public class Chunk {
             vertices.add(uvs[i*2]);
             vertices.add(uvs[i*2+1]);
 
-            vertices.add(light);
+            vertices.add(blockLight);
+            vertices.add(skyLight);
         }
 
         indices.add(vertexOffset);
@@ -373,9 +394,10 @@ public class Chunk {
         for(int i=0;i<idx.size();i++) idxArray[i]=idx.get(i);
 
         BufferLayoutElement[] layout = {
-                new BufferLayoutElement(GL_FLOAT,3,false),
-                new BufferLayoutElement(GL_FLOAT,2,false),
-                new BufferLayoutElement(GL_FLOAT,1,false)
+                new BufferLayoutElement(GL_FLOAT,3,false),  // position
+                new BufferLayoutElement(GL_FLOAT,2,false),  // texCoord
+                new BufferLayoutElement(GL_FLOAT,1,false),  // blockLight
+                new BufferLayoutElement(GL_FLOAT,1,false)   // skyLight
         };
 
         VertexArray vao = new VertexArray(array,idxArray,layout);
@@ -433,9 +455,10 @@ public class Chunk {
         for(int i=0;i<idx.size();i++) idxArray[i]=idx.get(i);
 
         BufferLayoutElement[] layout = {
-                new BufferLayoutElement(GL_FLOAT,3,false),
-                new BufferLayoutElement(GL_FLOAT,2,false),
-                new BufferLayoutElement(GL_FLOAT,1,false)
+                new BufferLayoutElement(GL_FLOAT,3,false),  // position
+                new BufferLayoutElement(GL_FLOAT,2,false),  // texCoord
+                new BufferLayoutElement(GL_FLOAT,1,false),  // blockLight
+                new BufferLayoutElement(GL_FLOAT,1,false)   // skyLight
         };
 
         VertexArray vao = new VertexArray(array,idxArray,layout);
