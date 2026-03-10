@@ -247,9 +247,6 @@ public class World {
     public void propagateBlockLight(int worldX, int y, int worldZ, int initialLight) {
         if (initialLight <= 0) return;
 
-        System.out.println("=== STARTING LIGHT PROPAGATION ===");
-        System.out.println("Start pos: " + worldX + "," + y + "," + worldZ + " with light level " + initialLight);
-
         Set<ColumnPos> affectedChunks = new HashSet<>();
 
         // Simple BFS queue
@@ -288,9 +285,7 @@ public class World {
                 {0, 0, 1}, {0, 0, -1}
         };
 
-        int processedNodes = 0;
         while (!queue.isEmpty()) {
-            processedNodes++;
             LightNode node = queue.poll();
             int lx = node.x, ly = node.y, lz = node.z;
             int level = node.light;
@@ -304,20 +299,13 @@ public class World {
 
             ColumnPos colPos = new ColumnPos(cx, cz);
             Chunk chunk = columns.get(colPos);
-            if (chunk == null) {
-                if (processedNodes < 5) System.out.println("  Chunk null at " + cx + "," + cz);
-                continue;
-            }
+            if (chunk == null) continue;
 
             int currentLight = chunk.getBlockLight(localX, ly, localZ) & 0xFF;
-            if (currentLight >= level) {
-                if (processedNodes < 5) System.out.println("  Already lit at " + lx + "," + ly + "," + lz + " (current=" + currentLight + ", new=" + level + ")");
-                continue;
-            }
+            if (currentLight >= level) continue;
 
             chunk.setBlockLight(localX, ly, localZ, (byte) level);
             affectedChunks.add(colPos);
-            if (processedNodes < 5) System.out.println("  Set light at " + lx + "," + ly + "," + lz + " to " + level);
 
             // Spread to neighbors
             int nextLevel = level - 1;
@@ -348,17 +336,13 @@ public class World {
             }
         }
 
-        System.out.println("Processed " + processedNodes + " nodes, affected " + affectedChunks.size() + " chunks");
-
         // Rebuild meshes for all affected chunks immediately
         for (ColumnPos pos : affectedChunks) {
             Chunk chunk = columns.get(pos);
             if (chunk != null) {
-                // Force mesh rebuild with new lighting
                 chunk.invalidateMeshes();
             }
         }
-        System.out.println("=== LIGHT PROPAGATION COMPLETE ===\n");
     }
 
 

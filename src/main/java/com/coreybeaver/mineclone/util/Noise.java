@@ -50,6 +50,38 @@ public class Noise {
         return res;
     }
 
+    public static double noise3D(double x, double y, double z) {
+        int X = fastfloor(x) & 255;
+        int Y = fastfloor(y) & 255;
+        int Z = fastfloor(z) & 255;
+
+        x -= fastfloor(x);
+        y -= fastfloor(y);
+        z -= fastfloor(z);
+
+        double u = fade(x);
+        double v = fade(y);
+        double w = fade(z);
+
+        int A = perm[X] + Y;
+        int AA = perm[A] + Z;
+        int AB = perm[A + 1] + Z;
+        int B = perm[X + 1] + Y;
+        int BA = perm[B] + Z;
+        int BB = perm[B + 1] + Z;
+
+        return lerp(w,
+            lerp(v,
+                lerp(u, grad3D(perm[AA], x, y, z), grad3D(perm[BA], x - 1, y, z)),
+                lerp(u, grad3D(perm[AB], x, y - 1, z), grad3D(perm[BB], x - 1, y - 1, z))
+            ),
+            lerp(v,
+                lerp(u, grad3D(perm[AA + 1], x, y, z - 1), grad3D(perm[BA + 1], x - 1, y, z - 1)),
+                lerp(u, grad3D(perm[AB + 1], x, y - 1, z - 1), grad3D(perm[BB + 1], x - 1, y - 1, z - 1))
+            )
+        );
+    }
+
     /**
      * Simple fractional Brownian motion over multiple octaves, returning
      * values in [-1,1].  Increasing octaves adds detail (roughness).
@@ -62,6 +94,21 @@ public class Noise {
 
         for (int i = 0; i < octaves; i++) {
             total += noise(x * frequency, y * frequency) * amplitude;
+            max += amplitude;
+            amplitude *= gain;
+            frequency *= lacunarity;
+        }
+        return total / max;
+    }
+
+    public static double fbm3D(double x, double y, double z, int octaves, double lacunarity, double gain) {
+        double total = 0;
+        double frequency = 1;
+        double amplitude = 1;
+        double max = 0;
+
+        for (int i = 0; i < octaves; i++) {
+            total += noise3D(x * frequency, y * frequency, z * frequency) * amplitude;
             max += amplitude;
             amplitude *= gain;
             frequency *= lacunarity;
@@ -84,6 +131,13 @@ public class Noise {
         int h = hash & 7;      // Convert low 3 bits of hash code
         double u = h < 4 ? x : y;
         double v = h < 4 ? y : x;
+        return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+    }
+
+    private static double grad3D(int hash, double x, double y, double z) {
+        int h = hash & 15;
+        double u = h < 8 ? x : y;
+        double v = h < 4 ? y : h == 12 || h == 14 ? x : z;
         return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
     }
 }

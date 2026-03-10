@@ -68,6 +68,7 @@ public class ChunkGenerator {
                     }
                     // above surface remains air
                 }
+
                 // after filling column, optionally add a tree
                 Biome.SubBiome sb = biome.getSubBiome(worldX, worldZ);
                 double treeNoise = Noise.fbm(worldX * 0.1, worldZ * 0.1, 2, 2.0, 0.5);
@@ -133,6 +134,23 @@ public class ChunkGenerator {
                     if (chunk.getBlock(x, y, z) == 0) {
                         chunk.setBlock(x, y, z, 12);
                         chunkWaterCount++;
+                    }
+                }
+            }
+        }
+
+        // Carve caves AFTER water generation using 3D noise
+        for (int x = 0; x < Chunk.WIDTH; x++) {
+            for (int z = 0; z < Chunk.DEPTH; z++) {
+                int worldX = chunkX * Chunk.WIDTH + x;
+                int worldZ = chunkZ * Chunk.DEPTH + z;
+
+                for (int y = 5; y < Chunk.HEIGHT - 5; y++) {
+                    if (chunk.getBlock(x, y, z) != 0 && chunk.getBlock(x, y, z) != 12) {
+                        double caveNoise = Noise.fbm3D(worldX * 0.03, y * 0.05, worldZ * 0.03, 4, 2.0, 0.5);
+                        if (caveNoise > 0.2) {
+                            chunk.setBlock(x, y, z, 0);
+                        }
                     }
                 }
             }
