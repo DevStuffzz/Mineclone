@@ -88,6 +88,12 @@ public class World {
             pendingSet.remove(next);
             Chunk chunk = ChunkGenerator.GenChunkOverworld(this, next.x, next.z);
             columns.put(next, chunk);
+
+            // Propagate light from sources in this new chunk
+            propagateLightForChunk(next.x, next.z);
+
+            // Spread light from neighboring chunks into the new chunk
+            spreadLightFromNeighbors(next.x, next.z);
         }
 
         Iterator<ColumnPos> it = columns.keySet().iterator();
@@ -96,6 +102,144 @@ public class World {
             if (Math.abs(pos.x - camCx) > viewDistance ||
                 Math.abs(pos.z - camCz) > viewDistance) {
                 it.remove();
+            }
+        }
+    }
+
+    private void propagateLightForChunk(int chunkX, int chunkZ) {
+        ColumnPos pos = new ColumnPos(chunkX, chunkZ);
+        Chunk chunk = columns.get(pos);
+        if (chunk == null) return;
+
+        // Find all light sources in this chunk
+        for (int x = 0; x < Chunk.WIDTH; x++) {
+            for (int y = 0; y < Chunk.HEIGHT; y++) {
+                for (int z = 0; z < Chunk.DEPTH; z++) {
+                    int blockId = chunk.getBlock(x, y, z);
+                    Block block = BlockManager.Get().GetBlock(blockId);
+                    if (block != null && block.light) {
+                        int worldX = chunkX * Chunk.WIDTH + x;
+                        int worldZ = chunkZ * Chunk.DEPTH + z;
+                        propagateBlockLight(worldX, y, worldZ, 15);
+                    }
+                }
+            }
+        }
+    }
+
+    private void spreadLightFromNeighbors(int chunkX, int chunkZ) {
+        ColumnPos pos = new ColumnPos(chunkX, chunkZ);
+        Chunk chunk = columns.get(pos);
+        if (chunk == null) return;
+
+        // Check all edge blocks of the new chunk and spread light from neighbors
+        for (int y = 0; y < Chunk.HEIGHT; y++) {
+            // Check all 4 edges of the chunk
+            for (int x = 0; x < Chunk.WIDTH; x++) {
+                // North edge (z=0)
+                checkAndSpreadFromNeighbor(chunkX, chunkZ, x, y, 0, 0, 0, -1);
+                // South edge (z=15)
+                checkAndSpreadFromNeighbor(chunkX, chunkZ, x, y, Chunk.DEPTH - 1, 0, 0, 1);
+            }
+            for (int z = 0; z < Chunk.DEPTH; z++) {
+                // West edge (x=0)
+                checkAndSpreadFromNeighbor(chunkX, chunkZ, 0, y, z, -1, 0, 0);
+                // East edge (x=15)
+                checkAndSpreadFromNeighbor(chunkX, chunkZ, Chunk.WIDTH - 1, y, z, 1, 0, 0);
+            }
+        }
+    }
+
+    private void checkAndSpreadFromNeighbor(int chunkX, int chunkZ, int localX, int y, int localZ, int dx, int dy, int dz) {
+        int worldX = chunkX * Chunk.WIDTH + localX;
+        int worldZ = chunkZ * Chunk.DEPTH + localZ;
+
+        // Get light from the neighboring block (in adjacent chunk)
+        int neighborWorldX = worldX + dx;
+        int neighborWorldY = y + dy;
+        int neighborWorldZ = worldZ + dz;
+
+        byte neighborLight = getBlockLightAt(neighborWorldX, neighborWorldY, neighborWorldZ);
+        if (neighborLight > 1) {
+            // Calculate what the light should be in the new chunk's edge block
+            int newLight = (neighborLight & 0xFF) - 1;
+            if (newLight <= 0) return;
+
+            // Get the chunk and set the light directly
+            ColumnPos pos = new ColumnPos(chunkX, chunkZ);
+            Chunk chunk = columns.get(pos);
+            if (chunk == null) return;
+
+            int currentLight = chunk.getBlockLight(localX, y, localZ) & 0xFF;
+            if (currentLight >= newLight) return; // Already lit better
+
+            chunk.setBlockLight(localX, y, localZ, (byte) newLight);
+
+            // Now propagate from this newly lit block into the chunk
+            spreadLightIntoChunk(worldX, y, worldZ, newLight);
+        }
+    }
+
+    private void spreadLightIntoChunk(int worldX, int y, int worldZ, int lightLevel) {
+        Queue<int[]> queue = new ArrayDeque<>();
+        Set<Long> visited = new HashSet<>();
+        Set<ColumnPos> affectedChunks = new HashSet<>();
+
+        queue.add(new int[]{worldX, y, worldZ, lightLevel});
+        visited.add(((long)worldX << 32) | ((long)y << 16) | (long)worldZ);
+
+        int[][] directions = {
+            {1, 0, 0}, {-1, 0, 0},
+            {0, 1, 0}, {0, -1, 0},
+            {0, 0, 1}, {0, 0, -1}
+        };
+
+        while (!queue.isEmpty()) {
+            int[] node = queue.poll();
+            int x = node[0], ny = node[1], z = node[2], level = node[3];
+
+            int nextLevel = level - 1;
+            if (nextLevel <= 0) continue;
+
+            for (int[] dir : directions) {
+                int nx = x + dir[0];
+                int ny2 = ny + dir[1];
+                int nz = z + dir[2];
+
+                if (ny2 < 0 || ny2 >= Chunk.HEIGHT) continue;
+
+                long key = ((long)nx << 32) | ((long)ny2 << 16) | (long)nz;
+                if (visited.contains(key)) continue;
+
+                int ncx = Math.floorDiv(nx, Chunk.WIDTH);
+                int ncz = Math.floorDiv(nz, Chunk.DEPTH);
+                ColumnPos npos = new ColumnPos(ncx, ncz);
+                Chunk nchunk = columns.get(npos);
+                if (nchunk == null) continue;
+
+                int localNX = nx - ncx * Chunk.WIDTH;
+                int localNZ = nz - ncz * Chunk.DEPTH;
+
+                // Check if solid
+                int blockId = nchunk.getBlock(localNX, ny2, localNZ);
+                Block block = BlockManager.Get().GetBlock(blockId);
+                if (block != null && block.type == BlockType.SOLID) continue;
+
+                int currentLight = nchunk.getBlockLight(localNX, ny2, localNZ) & 0xFF;
+                if (currentLight >= nextLevel) continue;
+
+                nchunk.setBlockLight(localNX, ny2, localNZ, (byte) nextLevel);
+                affectedChunks.add(npos);
+                visited.add(key);
+                queue.add(new int[]{nx, ny2, nz, nextLevel});
+            }
+        }
+
+        // Invalidate meshes for affected chunks
+        for (ColumnPos pos : affectedChunks) {
+            Chunk chunk = columns.get(pos);
+            if (chunk != null) {
+                chunk.invalidateMeshes();
             }
         }
     }

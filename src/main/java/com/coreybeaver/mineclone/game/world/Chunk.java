@@ -69,39 +69,13 @@ public class Chunk {
 
     // Function ran right after chunk generation
     public void PostGeneration(int chunkX, int chunkZ) {
-        // Set all blocks to 0, except light-emitting blocks
-        int lightSourceCount = 0;
-        List<int[]> lightSources = new ArrayList<>();
-
+        // Initialize all light to 0
         for(int x = 0; x < WIDTH; x++) {
             for(int y = 0; y < HEIGHT; y++) {
                 for(int z = 0; z < DEPTH; z++) {
-                    int blockId = blocks[x][y][z];
-                    Block block = BlockManager.Get().GetBlock(blockId);
-
-                    if (block != null && block.light) {
-                        // Light source - set to max
-                        blockLight[x][y][z] = 15;
-                        lightSourceCount++;
-                        lightSources.add(new int[]{x, y, z});
-                        System.out.println("Found light source at chunk-local " + x + "," + y + "," + z + " (block ID " + blockId + ")");
-                    } else {
-                        // Not a light source - set to 0
-                        blockLight[x][y][z] = 0;
-                    }
+                    blockLight[x][y][z] = 0;
                 }
             }
-        }
-
-        if (lightSourceCount > 0) {
-            System.out.println("Chunk " + chunkX + "," + chunkZ + " has " + lightSourceCount + " light sources. Propagating...");
-
-            // Propagate light from each source (within chunk only)
-            for (int[] source : lightSources) {
-                propagateLightInChunk(source[0], source[1], source[2], 15);
-            }
-
-            System.out.println("Light propagation complete for chunk " + chunkX + "," + chunkZ);
         }
     }
 
