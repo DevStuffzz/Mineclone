@@ -12,7 +12,7 @@ import static org.lwjgl.opengl.GL11.GL_FLOAT;
 public class Chunk {
 
     public static final int WIDTH = 16;
-    public static final int HEIGHT = 128;
+    public static final int HEIGHT = 256;
     public static final int DEPTH = 16;
 
     private int[][][] blocks;

@@ -10,9 +10,9 @@ import com.coreybeaver.mineclone.util.Noise;
 public enum Biome {
     DEEP_OCEAN(16, 4),      // deep and flat
     SHALLOW_OCEAN(40, 8),    // just below sea level (64)
-    PLAINS(72, 12),          // low land above water
-    HILLS(88, 20),           // rolling hills
-    MOUNTAINS(104, 32);      // high peaks
+    PLAINS(70, 4),          // even flatter
+    HILLS(104, 40),           // rolling hills
+    MOUNTAINS(160, 80);      // high peaks
 
     /**
      * Sub‑biomes give visual/functional variety within a main biome.  They
@@ -38,11 +38,11 @@ public enum Biome {
      * produce ocean biomes, positives produce land biomes.
      */
     public static Biome getBiome(int worldX, int worldZ) {
-        double elevation = Noise.fbm(worldX * 0.002, worldZ * 0.002, 3, 2.0, 0.5);
+        double elevation = Noise.fbm(worldX * 0.001, worldZ * 0.001, 3, 2.0, 0.5);
         if (elevation < -0.6) return DEEP_OCEAN;
         if (elevation < -0.2) return SHALLOW_OCEAN;
-        if (elevation < 0.0)  return PLAINS;
-        if (elevation < 0.4)  return HILLS;
+        if (elevation < 0.2)  return PLAINS;
+        if (elevation < 0.5)  return HILLS;
         return MOUNTAINS;
     }
 
@@ -52,10 +52,10 @@ public enum Biome {
      * between indicate a transition.
      */
     public static BlendResult getBiomeBlend(int worldX, int worldZ) {
-        double elevation = Noise.fbm(worldX * 0.002, worldZ * 0.002, 3, 2.0, 0.5);
+        double elevation = Noise.fbm(worldX * 0.001, worldZ * 0.001, 3, 2.0, 0.5);
         // thresholds must be one more than the number of biomes so that every
         // interval has a start and end value.  order[i] blends toward order[i+1].
-        double[] thresh = {-1.0, -0.6, -0.2, 0.0, 0.4, 1.0};
+        double[] thresh = {-1.0, -0.6, -0.2, 0.2, 0.5, 1.0};
         Biome[] order = {DEEP_OCEAN, SHALLOW_OCEAN, PLAINS, HILLS, MOUNTAINS};
 
         // iterate only up to the penultimate biome, because we reference i+1
@@ -78,6 +78,12 @@ public enum Biome {
         double base = lerp(br.biomeA.baseHeight, br.biomeB.baseHeight, br.t);
         double var  = lerp(br.biomeA.variation, br.biomeB.variation, br.t);
 
+        // Sub-biome height variation adjustment: desert is even flatter (half variation)
+        SubBiome sb = getSubBiome(worldX, worldZ);
+        if (sb == SubBiome.DESERT) {
+            var *= 0.5;
+        }
+
         double h = Noise.fbm(worldX * 0.02, worldZ * 0.02, 4, 2.0, 0.5);
         int height = (int) (base + h * var);
         if (height < 0) height = 0;
@@ -90,10 +96,12 @@ public enum Biome {
      * have meaningful variants; others always return NONE.
      */
     public SubBiome getSubBiome(int worldX, int worldZ) {
-        double n = Noise.fbm(worldX * 0.01, worldZ * 0.01, 2, 2.0, 0.5);
+        // Reduced frequency from 0.01 to 0.003 to make sub-biomes larger.
+        double n = Noise.fbm(worldX * 0.003, worldZ * 0.003, 2, 2.0, 0.5);
         switch (this) {
             case PLAINS:
-                if (n < -0.2) return SubBiome.DESERT;
+                // Thresholds adjusted for rarity: desert is more rare (< -0.4).
+                if (n < -0.4) return SubBiome.DESERT;
                 if (n > 0.2) return SubBiome.FOREST;
                 return SubBiome.NONE;
             case HILLS:
@@ -109,9 +117,14 @@ public enum Biome {
      * (taking sub-biome into account).  Uses BlockManager, so callers should
      * be in a context where it has been initialized.
      */
-    public int surfaceTopBlock(int worldX, int worldZ) {
+    public int surfaceTopBlock(int worldX, int worldZ, int y) {
         BlockManager bm = BlockManager.Get();
         switch (this) {
+            case MOUNTAINS: {
+                if (y > 200) return bm.getIdByName("snow_block");
+                if (y > 180) return bm.getIdByName("snow_grass_block");
+                return bm.getIdByName("stone");
+            }
             case PLAINS: {
                 SubBiome sb = getSubBiome(worldX, worldZ);
                 switch (sb) {
@@ -131,7 +144,42 @@ public enum Biome {
             case SHALLOW_OCEAN:
             case DEEP_OCEAN:
                 return bm.getIdByName("sand");
-            case MOUNTAINS:
+            default:
+                return bm.getIdByName("stone");
+        }
+    }
+
+    /**
+     * Return the block ID for the layer immediately underneath the surface.
+     * Often dirt (ID 4) for land biomes, sandstone/sand for oceans.
+     */
+    public int surfaceUnderBlock(int worldX, int worldZ, int y, int surfaceY) {
+        BlockManager bm = BlockManager.Get();
+        int depth = surfaceY - y;
+
+        switch (this) {
+            case MOUNTAINS: {
+                if (y > 200) return bm.getIdByName("snow_block");
+                if (y > 180) return bm.getIdByName("snow_grass_block");
+                return bm.getIdByName("stone");
+            }
+            case PLAINS:
+            case HILLS: {
+                SubBiome sb = getSubBiome(worldX, worldZ);
+                if (sb == SubBiome.DESERT) {
+                    if (depth < 2) return bm.getIdByName("sand");
+                    if (depth < 4) return bm.getIdByName("sandstone");
+                    return bm.getIdByName("stone");
+                }
+                if (depth <= 3) return bm.getIdByName("dirt");
+                return bm.getIdByName("stone");
+            }
+            case SHALLOW_OCEAN:
+            case DEEP_OCEAN: {
+                if (depth < 2) return bm.getIdByName("sand");
+                if (depth < 4) return bm.getIdByName("sandstone");
+                return bm.getIdByName("stone");
+            }
             default:
                 return bm.getIdByName("stone");
         }

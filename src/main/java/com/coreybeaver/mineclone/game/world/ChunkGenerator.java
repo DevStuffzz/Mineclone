@@ -9,22 +9,22 @@ public class ChunkGenerator {
     // simple tree generator parameters
     private static final int TRUNK_HEIGHT = 4;      // slightly shorter trunks
     private static final int LEAF_RADIUS = 2;       // radius for canopy (bigger now)
-    private static final double FOREST_TREE_CHANCE = 0.6; // per-column
-    private static final double PLAINS_TREE_CHANCE = 0.02; // rare plains sapling
+    private static final double FOREST_TREE_CHANCE = 0.04; // extremely sparse forest
+    private static final double PLAINS_TREE_CHANCE = 0.001; // nearly non-existent plains sapling
 
     private static final double GRASS_CHANCE = 0.25;   // fairly common
     private static final double ROSE_CHANCE  = 0.03;   // rare
 
     // Ore and dirt vein parameters: {id, minY, maxY, chancePerChunk, maxVeinSize}
     private static final int[][] ORE_PARAMS = {
-        {4, 0, 128, 20, 10},  // dirt: everywhere, common, large veins
-        {16, 40, 128, 20, 8}, // coal: high, common, medium-large veins
-        {15, 30, 100, 15, 7}, // iron: high/mid, common, medium veins
-        {17, 20, 60, 10, 5},  // silver: middle, less common, small-medium veins
-        {18, 0, 30, 4, 4},   // diamond: deep, rare, small veins
-        {19, 0, 20, 2, 3},   // ruby: deep, very rare, very small veins
-        {20, 0, 25, 2, 3},   // lapis: deep, very rare, very small veins
-        {21, 0, 15, 1, 3}    // emerald: deepest, rarest, very small veins
+        {4, 0, 256, 30, 10},  // dirt: everywhere, common, large veins
+        {16, 40, 256, 30, 8}, // coal: high, common, medium-large veins
+        {15, 30, 200, 20, 7}, // iron: high/mid, common, medium veins
+        {17, 20, 120, 12, 5},  // silver: middle, less common, small-medium veins
+        {18, 0, 60, 5, 4},   // diamond: deep, rare, small veins
+        {19, 0, 40, 3, 3},   // ruby: deep, very rare, very small veins
+        {20, 0, 50, 3, 3},   // lapis: deep, very rare, very small veins
+        {21, 0, 30, 2, 3}    // emerald: deepest, rarest, very small veins
     };
 
     public static Chunk GenChunkOverworld(World world, int chunkX, int chunkZ) {
@@ -47,35 +47,15 @@ public class ChunkGenerator {
                 // choose biome and get surface height for this column
                 Biome biome = Biome.getBiome(worldX, worldZ);
                 int surfaceY = biome.surfaceHeight(worldX, worldZ);
-
-                // for ocean biomes we want a sand/sandstone seabed; compute ids
-                BlockManager bm = BlockManager.Get();
-                int sandId = bm.getIdByName("sand");
-                int sandstoneId = bm.getIdByName("sandstone");
-                int stoneId = bm.getIdByName("stone");
-
-                int topId = biome.surfaceTopBlock(worldX, worldZ);
-
+                int topId = biome.surfaceTopBlock(worldX, worldZ, surfaceY);
                 // fill vertical slice based on surface height
                 for (int y = 0; y < Chunk.HEIGHT; y++) {
                     if (y <= surfaceY) {
-                        if (biome == Biome.DEEP_OCEAN || biome == Biome.SHALLOW_OCEAN) {
-                            int depth = surfaceY - y;
-                            if (depth < 2 && sandId >= 0) {
-                                chunk.setBlock(x, y, z, sandId);
-                            } else if (depth < 4 && sandstoneId >= 0) {
-                                chunk.setBlock(x, y, z, sandstoneId);
-                            } else if (stoneId >= 0) {
-                                chunk.setBlock(x, y, z, stoneId);
-                            }
+                        if (y == surfaceY) {
+                            chunk.setBlock(x, y, z, topId);
                         } else {
-                            if (y == surfaceY) {
-                                chunk.setBlock(x, y, z, topId);
-                            } else if (y < surfaceY && y >= surfaceY - 3) {
-                                chunk.setBlock(x, y, z, 4);           // dirt remains constant
-                            } else if (y < surfaceY - 3) {
-                                chunk.setBlock(x, y, z, 5);           // stone
-                            }
+                            int blockId = biome.surfaceUnderBlock(worldX, worldZ, y, surfaceY);
+                            chunk.setBlock(x, y, z, blockId);
                         }
                     }
                     // above surface remains air
@@ -156,18 +136,23 @@ public class ChunkGenerator {
                 if (chunk.getBlock(x, surfaceY, z) == grassId) {
                     // Tree placement logic
                     Biome.SubBiome sb = biome.getSubBiome(worldX, worldZ);
-                    double treeNoise = Noise.fbm(worldX * 0.1, worldZ * 0.1, 2, 2.0, 0.5);
-                    double tThreshold = 1.0;
+                    
+                    // Use a stable seed for this block to determine if a tree *could* spawn here
+                    // This creates a more uniform (non-clustered) distribution than Perlin noise.
+                    java.util.Random treeRand = new java.util.Random((long)worldX * 73856093L ^ (long)worldZ * 19349663L);
+                    double spawnValue = treeRand.nextDouble();
+                    
+                    double chance = 0.0;
                     if (sb == Biome.SubBiome.FOREST) {
-                        tThreshold = 1.0 - FOREST_TREE_CHANCE;
+                        chance = FOREST_TREE_CHANCE;
                     } else if (biome == Biome.PLAINS) {
-                        tThreshold = 1.0 - PLAINS_TREE_CHANCE;
+                        chance = PLAINS_TREE_CHANCE;
                     }
 
-                    if (treeNoise > tThreshold && surfaceY + TRUNK_HEIGHT + 1 < Chunk.HEIGHT) {
+                    if (spawnValue < chance && surfaceY + TRUNK_HEIGHT + 1 < Chunk.HEIGHT) {
                         boolean near = false;
-                        for (int dx = -1; dx <= 1 && !near; dx++) {
-                            for (int dz = -1; dz <= 1; dz++) {
+                        for (int dx = -3; dx <= 3 && !near; dx++) {
+                            for (int dz = -3; dz <= 3; dz++) {
                                 int nx = x + dx;
                                 int nz = z + dz;
                                 if (nx >= 0 && nx < Chunk.WIDTH && nz >= 0 && nz < Chunk.DEPTH) {
