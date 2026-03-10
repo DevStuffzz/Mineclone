@@ -15,6 +15,18 @@ public class ChunkGenerator {
     private static final double GRASS_CHANCE = 0.25;   // fairly common
     private static final double ROSE_CHANCE  = 0.03;   // rare
 
+    // Ore and dirt vein parameters: {id, minY, maxY, chancePerChunk, maxVeinSize}
+    private static final int[][] ORE_PARAMS = {
+        {4, 0, 128, 20, 10},  // dirt: everywhere, common, large veins
+        {16, 40, 128, 20, 8}, // coal: high, common, medium-large veins
+        {15, 30, 100, 15, 7}, // iron: high/mid, common, medium veins
+        {17, 20, 60, 10, 5},  // silver: middle, less common, small-medium veins
+        {18, 0, 30, 4, 4},   // diamond: deep, rare, small veins
+        {19, 0, 20, 2, 3},   // ruby: deep, very rare, very small veins
+        {20, 0, 25, 2, 3},   // lapis: deep, very rare, very small veins
+        {21, 0, 15, 1, 3}    // emerald: deepest, rarest, very small veins
+    };
+
     public static Chunk GenChunkOverworld(World world, int chunkX, int chunkZ) {
         Chunk chunk = new Chunk();
         // store position (in blocks) for proper mesh translation later
@@ -69,73 +81,31 @@ public class ChunkGenerator {
                     // above surface remains air
                 }
 
-                // after filling column, optionally add a tree
-                Biome.SubBiome sb = biome.getSubBiome(worldX, worldZ);
-                double treeNoise = Noise.fbm(worldX * 0.1, worldZ * 0.1, 2, 2.0, 0.5);
-                double threshold = 1.0; // >1 means no tree
-                if (sb == Biome.SubBiome.FOREST) {
-                    threshold = 1.0 - FOREST_TREE_CHANCE; // high probability
-                } else if (biome == Biome.PLAINS) {
-                    threshold = 1.0 - PLAINS_TREE_CHANCE; // low probability
-                }
-                if (treeNoise > threshold && surfaceY + TRUNK_HEIGHT + 1 < Chunk.HEIGHT) {
-                    // don't place next to an existing tree in this chunk
-                    boolean near = false;
-                    for (int dx = -1; dx <= 1 && !near; dx++) {
-                        for (int dz = -1; dz <= 1; dz++) {
-                            int nx = x + dx;
-                            int nz = z + dz;
-                            if (nx >= 0 && nx < Chunk.WIDTH && nz >= 0 && nz < Chunk.DEPTH) {
-                                if (treePlaced[nx][nz]) {
-                                    near = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (!near) {
-                        placeOakTree(chunk, x, surfaceY + 1, z);
-                        treePlaced[x][z] = true;
-                    }
-                }
-
-                int grassId = 11;
-                int roseId  = 13;
-
-                if (biome != Biome.DEEP_OCEAN && biome != Biome.SHALLOW_OCEAN) {
-
-                    // Must be above sea level and have air above
-                    if (surfaceY >= SEA_LEVEL &&
-                            surfaceY + 1 < Chunk.HEIGHT &&
-                            chunk.getBlock(x, surfaceY + 1, z) == 0) {
-
-                        int groundBlock = chunk.getBlock(x, surfaceY, z);
-
-                        // Only grow on grass (topId is grass in plains/forest)
-                        if (groundBlock == 1) {
-
-                            double decoNoise = Noise.fbm(worldX * 0.2, worldZ * 0.2, 2, 2.0, 0.5);
-                            decoNoise = (decoNoise + 1.0) * 0.5; // normalize to 0–1
-
-                            if (decoNoise > 1.0 - ROSE_CHANCE) {
-                                chunk.setBlock(x, surfaceY + 1, z, roseId);
-                            }
-                            else if (decoNoise > 1.0 - GRASS_CHANCE) {
-                                chunk.setBlock(x, surfaceY + 1, z, grassId);
-                            }
-                        }
-                    }
-                }
-
-                // after that place water in any empty block below
                 // the global sea level so lowlands become lakes/oceans.
                 int waterLevel = SEA_LEVEL; // use constant defined above
                 for (int y = 0; y <= waterLevel && y < Chunk.HEIGHT; y++) {
                     if (chunk.getBlock(x, y, z) == 0) {
                         chunk.setBlock(x, y, z, 12);
-                        chunkWaterCount++;
                     }
                 }
+            }
+        }
+
+        // Generate Ores and Dirt veins in stone
+        java.util.Random random = new java.util.Random((long)chunkX * 34123123L ^ (long)chunkZ * 567891234L);
+        for (int[] ore : ORE_PARAMS) {
+            int oreId = ore[0];
+            int minY = ore[1];
+            int maxY = ore[2];
+            int attempts = ore[3];
+            int maxVeinSize = ore[4];
+
+            for (int i = 0; i < attempts; i++) {
+                int startX = random.nextInt(Chunk.WIDTH);
+                int startY = minY + random.nextInt(Math.max(1, maxY - minY));
+                int startZ = random.nextInt(Chunk.DEPTH);
+
+                generateVein(chunk, startX, startY, startZ, oreId, maxVeinSize, random);
             }
         }
 
@@ -145,11 +115,83 @@ public class ChunkGenerator {
                 int worldX = chunkX * Chunk.WIDTH + x;
                 int worldZ = chunkZ * Chunk.DEPTH + z;
 
-                for (int y = 5; y < Chunk.HEIGHT - 5; y++) {
+                for (int y = 2; y < Chunk.HEIGHT - 5; y++) {
                     if (chunk.getBlock(x, y, z) != 0 && chunk.getBlock(x, y, z) != 12) {
                         double caveNoise = Noise.fbm3D(worldX * 0.03, y * 0.05, worldZ * 0.03, 4, 2.0, 0.5);
-                        if (caveNoise > 0.2) {
+
+                        // Caves should be bigger the lower they go.
+                        // Decrease threshold linearly as y decreases.
+                        double depthScale = (double) y / Chunk.HEIGHT; // 0 to 1
+                        double threshold = 0.1 + (depthScale * 0.3); // 0.1 at bottom, 0.4 at top
+
+                        if (caveNoise > threshold) {
                             chunk.setBlock(x, y, z, 0);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Place trees and plants on grass *after* caves are generated
+        for (int x = 0; x < Chunk.WIDTH; x++) {
+            for (int z = 0; z < Chunk.DEPTH; z++) {
+                int worldX = chunkX * Chunk.WIDTH + x;
+                int worldZ = chunkZ * Chunk.DEPTH + z;
+
+                // Find the new surface after cave carving
+                int surfaceY = -1;
+                for (int y = Chunk.HEIGHT - 1; y >= 0; y--) {
+                    int block = chunk.getBlock(x, y, z);
+                    if (block != 0 && block != 12) { // Not air or water
+                        surfaceY = y;
+                        break;
+                    }
+                }
+
+                if (surfaceY < 0) continue;
+
+                Biome biome = Biome.getBiome(worldX, worldZ);
+                int grassId = 1; // Assuming grass block is ID 1
+
+                if (chunk.getBlock(x, surfaceY, z) == grassId) {
+                    // Tree placement logic
+                    Biome.SubBiome sb = biome.getSubBiome(worldX, worldZ);
+                    double treeNoise = Noise.fbm(worldX * 0.1, worldZ * 0.1, 2, 2.0, 0.5);
+                    double tThreshold = 1.0;
+                    if (sb == Biome.SubBiome.FOREST) {
+                        tThreshold = 1.0 - FOREST_TREE_CHANCE;
+                    } else if (biome == Biome.PLAINS) {
+                        tThreshold = 1.0 - PLAINS_TREE_CHANCE;
+                    }
+
+                    if (treeNoise > tThreshold && surfaceY + TRUNK_HEIGHT + 1 < Chunk.HEIGHT) {
+                        boolean near = false;
+                        for (int dx = -1; dx <= 1 && !near; dx++) {
+                            for (int dz = -1; dz <= 1; dz++) {
+                                int nx = x + dx;
+                                int nz = z + dz;
+                                if (nx >= 0 && nx < Chunk.WIDTH && nz >= 0 && nz < Chunk.DEPTH) {
+                                    if (treePlaced[nx][nz]) {
+                                        near = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!near) {
+                            placeOakTree(chunk, x, surfaceY + 1, z);
+                            treePlaced[x][z] = true;
+                        }
+                    }
+
+                    // Decoration logic (grass/roses)
+                    if (surfaceY >= SEA_LEVEL && surfaceY + 1 < Chunk.HEIGHT && chunk.getBlock(x, surfaceY + 1, z) == 0) {
+                        double decoNoise = Noise.fbm(worldX * 0.2, worldZ * 0.2, 2, 2.0, 0.5);
+                        decoNoise = (decoNoise + 1.0) * 0.5;
+                        if (decoNoise > 1.0 - ROSE_CHANCE) {
+                            chunk.setBlock(x, surfaceY + 1, z, 13);
+                        } else if (decoNoise > 1.0 - GRASS_CHANCE) {
+                            chunk.setBlock(x, surfaceY + 1, z, 11);
                         }
                     }
                 }
@@ -205,6 +247,24 @@ public class ChunkGenerator {
                     }
                 }
             }
+        }
+    }
+
+    private static void generateVein(Chunk chunk, int x, int y, int z, int blockId, int size, java.util.Random random) {
+        int stoneId = 5;
+        for (int i = 0; i < size; i++) {
+            if (chunk.inBounds(x, y, z)) {
+                // all should be in veins, where the rarer they are the smaller the vien
+                // make them spawn only in stone.
+                if (chunk.getBlock(x, y, z) == stoneId) {
+                    chunk.setBlock(x, y, z, blockId);
+                }
+            }
+
+            // Random walk to next block in vein
+            x += random.nextInt(3) - 1;
+            y += random.nextInt(3) - 1;
+            z += random.nextInt(3) - 1;
         }
     }
 }

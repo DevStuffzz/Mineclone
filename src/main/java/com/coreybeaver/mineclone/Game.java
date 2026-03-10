@@ -65,6 +65,14 @@ public class Game {
         manager.AddBlock(BlockType.PLANT, 12, 12, 12, "rose"); // 13
         manager.AddBlock(BlockType.SOLID, 105, 105, 105, "glowstone", true); // 14
 
+        manager.AddBlock(BlockType.SOLID, 32, 32, 32, "iron_ore"); // 15
+        manager.AddBlock(BlockType.SOLID, 34, 34, 34, "coal_ore"); // 16
+        manager.AddBlock(BlockType.SOLID, 33, 33, 33, "silver_ore"); // 17
+        manager.AddBlock(BlockType.SOLID, 50, 50, 50, "diamond_ore"); // 18
+        manager.AddBlock(BlockType.SOLID, 51, 51, 51, "ruby_ore"); // 19
+        manager.AddBlock(BlockType.SOLID, 160, 160, 160, "lapis_ore"); // 20
+        manager.AddBlock(BlockType.SOLID, 171, 171, 171, "emerald_ore"); // 21
+
     }
 
     private void Update() {
