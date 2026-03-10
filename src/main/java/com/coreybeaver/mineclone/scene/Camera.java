@@ -147,4 +147,12 @@ public class Camera {
     public Vector3f getRotation() {
         return rotation;
     }
+
+    public Vector3f getForward() {
+        return new Vector3f(
+                (float) Math.cos(rotation.x) * (float) Math.sin(rotation.y),
+                (float) Math.sin(rotation.x),
+                (float) Math.cos(rotation.x) * (float) Math.cos(rotation.y)
+        ).normalize();
+    }
 }

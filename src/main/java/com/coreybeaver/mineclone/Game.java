@@ -3,6 +3,7 @@ package com.coreybeaver.mineclone;
 import com.coreybeaver.mineclone.game.world.BlockManager;
 import com.coreybeaver.mineclone.game.world.BlockType;
 
+import com.coreybeaver.mineclone.io.Input;
 import com.coreybeaver.mineclone.io.Window;
 
 import com.coreybeaver.mineclone.renderer.Renderer;
@@ -78,6 +79,8 @@ public class Game {
             float deltaTime = currentTime - lastTime;
             lastTime = currentTime;
 
+            // Update input states for this frame
+            // Input.update();
 
             // --- Render scene to framebuffer ---
             MAIN_FB.bind();

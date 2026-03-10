@@ -448,6 +448,27 @@ public class World {
         return c.getBlock(lx, y, lz);
     }
 
+    public void setBlockAt(int worldX, int y, int worldZ, int blockId) {
+        int cx = (int) Math.floor((double) worldX / Chunk.WIDTH);
+        int cz = (int) Math.floor((double) worldZ / Chunk.DEPTH);
+        ColumnPos pos = new ColumnPos(cx, cz);
+        Chunk c = columns.get(pos);
+        if (c == null) return;
+        int lx = worldX - cx * Chunk.WIDTH;
+        int lz = worldZ - cz * Chunk.DEPTH;
+        if (lx < 0 || lx >= Chunk.WIDTH || y < 0 || y >= Chunk.HEIGHT || lz < 0 || lz >= Chunk.DEPTH) {
+            return;
+        }
+        c.setBlock(lx, y, lz, blockId);
+        c.invalidateMeshes();
+
+        // If it's a light source, propagate light
+        Block block = BlockManager.Get().GetBlock(blockId);
+        if (block != null && block.light) {
+            propagateBlockLight(worldX, y, worldZ, 15);
+        }
+    }
+
     public static class MeshLists {
         public final List<Mesh> solids = new ArrayList<>();
         public final List<Mesh> waters = new ArrayList<>();
