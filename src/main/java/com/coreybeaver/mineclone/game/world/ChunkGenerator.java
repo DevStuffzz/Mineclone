@@ -99,7 +99,7 @@ public class ChunkGenerator {
                     }
                 }
 
-                int grassId = 14;
+                int grassId = 11;
                 int roseId  = 13;
 
                 if (biome != Biome.DEEP_OCEAN && biome != Biome.SHALLOW_OCEAN) {

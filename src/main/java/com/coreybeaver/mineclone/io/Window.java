@@ -50,6 +50,10 @@ public class Window {
         GL.createCapabilities();
         // enable depth testing (was mistakenly using the clear mask)
         GL11.glEnable(GL11.GL_DEPTH_TEST);
+
+        // Capture and hide cursor for mouse look
+        glfwSetInputMode(glfwWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
         Input.init(glfwWindow);
 
         glfwSetWindowSizeCallback(glfwWindow, (win, width, height) -> {

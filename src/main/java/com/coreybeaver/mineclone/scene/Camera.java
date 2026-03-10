@@ -18,6 +18,12 @@ public class Camera {
     private float near = 0.1f;
     private float far = 1000f;
 
+    // Mouse look variables
+    private double lastMouseX = 0;
+    private double lastMouseY = 0;
+    private boolean firstMouse = true;
+    private float mouseSensitivity = 0.002f;
+
     public Camera(float width, float height) {
         this.aspect = width / height;
         projection = new Matrix4f().perspective(fov, aspect, near, far);
@@ -75,23 +81,29 @@ public class Camera {
     public void Update(float deltaTime) {
 
         float moveSpeed = 10.0f * deltaTime;
-        float lookSpeed = -2.5f * deltaTime;
 
         // =========================
-        // ROTATION (Arrow Keys)
+        // MOUSE LOOK
         // =========================
 
-        if (Input.getKey(GLFW_KEY_UP))
-            rotation.x -= lookSpeed;
+        double mouseX = -Input.getMouseX();
+        double mouseY = Input.getMouseY();
 
-        if (Input.getKey(GLFW_KEY_DOWN))
-            rotation.x += lookSpeed;
+        if (firstMouse) {
+            lastMouseX = mouseX;
+            lastMouseY = mouseY;
+            firstMouse = false;
+        }
 
-        if (Input.getKey(GLFW_KEY_LEFT))
-            rotation.y -= lookSpeed;
+        double deltaX = mouseX - lastMouseX;
+        double deltaY = mouseY - lastMouseY;
 
-        if (Input.getKey(GLFW_KEY_RIGHT))
-            rotation.y += lookSpeed;
+        lastMouseX = mouseX;
+        lastMouseY = mouseY;
+
+        // Apply mouse movement to rotation
+        rotation.y += (float) deltaX * mouseSensitivity;  // yaw
+        rotation.x -= (float) deltaY * mouseSensitivity;  // pitch (inverted)
 
         // Clamp pitch to avoid flipping
         float maxPitch = (float) Math.toRadians(89.0f);
@@ -102,10 +114,11 @@ public class Camera {
         // DIRECTION VECTORS
         // =========================
 
+        // Forward on the horizontal plane (ignoring pitch for movement)
         Vector3f forward = new Vector3f(
-                (float) Math.cos(rotation.x) * (float) Math.sin(rotation.y),
-                (float) Math.sin(rotation.x),
-                (float) Math.cos(rotation.x) * (float) Math.cos(rotation.y)
+                (float) Math.sin(rotation.y),
+                0,
+                (float) Math.cos(rotation.y)
         ).normalize();
 
         Vector3f right = new Vector3f(
@@ -115,7 +128,7 @@ public class Camera {
         ).normalize();
 
         // =========================
-        // MOVEMENT (WASD)
+        // MOVEMENT (WASD + Space/Shift)
         // =========================
 
         if (Input.getKey(GLFW_KEY_W))
@@ -129,6 +142,14 @@ public class Camera {
 
         if (Input.getKey(GLFW_KEY_A))
             position.sub(new Vector3f(right).mul(moveSpeed));
+
+        // Space to move up
+        if (Input.getKey(GLFW_KEY_SPACE))
+            position.y += moveSpeed;
+
+        // Shift to move down
+        if (Input.getKey(GLFW_KEY_LEFT_SHIFT) || Input.getKey(GLFW_KEY_RIGHT_SHIFT))
+            position.y -= moveSpeed;
     }
 
     public Matrix4f getProjection() {

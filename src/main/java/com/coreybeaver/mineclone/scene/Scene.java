@@ -158,7 +158,7 @@ public class Scene {
                 } else {
                     System.out.println("ERROR: No air position found before hitting block!");
                 }
-                break;d
+                break;
             }
         }
     }
