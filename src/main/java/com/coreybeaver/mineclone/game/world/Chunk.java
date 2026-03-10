@@ -177,29 +177,68 @@ public class Chunk {
             int worldZ = (int)posZ + nz;
 
             if (world != null) {
-                // Check if there's a block at the neighbor position
-                int neighborBlockId = world.getBlockAt(worldX, worldY, worldZ);
+                // Try to get lighting data
+                neighborBlockLight = world.getBlockLightAt(worldX, worldY, worldZ) & 0xFF;
+                neighborSkyLight = world.getSkyLightAt(worldX, worldY, worldZ) & 0xFF;
 
-                if (neighborBlockId == 0) {
-                    // Neighbor is air - if we can't get lighting data (chunk not loaded),
-                    // assume it's exposed to sky for a reasonable default
-                    neighborBlockLight = world.getBlockLightAt(worldX, worldY, worldZ) & 0xFF;
-                    neighborSkyLight = world.getSkyLightAt(worldX, worldY, worldZ) & 0xFF;
+                // If both are 0, the chunk likely isn't loaded yet
+                // Use the current block's own skylight as a fallback estimate
+                if (neighborBlockLight == 0 && neighborSkyLight == 0) {
+                    int neighborBlockId = world.getBlockAt(worldX, worldY, worldZ);
 
-                    // If both are 0, the chunk likely isn't loaded yet - assume skylight
-                    if (neighborBlockLight == 0 && neighborSkyLight == 0) {
-                        neighborSkyLight = 15;
+                    // If neighbor is air, use current block's skylight as estimate
+                    if (neighborBlockId == 0) {
+                        neighborSkyLight = skyLight[x][y][z] & 0xFF;
                     }
-                } else {
-                    // Neighbor is solid - get its light values
-                    neighborBlockLight = world.getBlockLightAt(worldX, worldY, worldZ) & 0xFF;
-                    neighborSkyLight = world.getSkyLightAt(worldX, worldY, worldZ) & 0xFF;
                 }
             }
         }
 
+        // Apply underwater lighting reduction (subtract 2 for each block depth underwater)
+        int underwaterDepth = calculateUnderwaterDepth(x, y, z);
+        if (underwaterDepth > 0) {
+            int reduction = underwaterDepth * 2;
+            neighborSkyLight = Math.max(0, neighborSkyLight - reduction);
+        }
+
         // Normalize to 0.0-1.0
         return new float[]{neighborBlockLight / 15.0f, neighborSkyLight / 15.0f};
+    }
+
+    // Calculate how many blocks deep underwater this block is
+    private int calculateUnderwaterDepth(int x, int y, int z) {
+        int depth = 0;
+
+        // Check blocks above to count water depth
+        for (int checkY = y + 1; checkY < HEIGHT; checkY++) {
+            int blockId;
+
+            if (inBounds(x, checkY, z)) {
+                blockId = blocks[x][checkY][z];
+            } else {
+                // Check world for blocks outside chunk
+                int worldX = (int)posX + x;
+                int worldZ = (int)posZ + z;
+                if (world != null) {
+                    blockId = world.getBlockAt(worldX, checkY, worldZ);
+                } else {
+                    break;
+                }
+            }
+
+            Block block = BlockManager.Get().GetBlock(blockId);
+            if (block != null && block.type == BlockType.LIQUID) {
+                depth++;
+            } else if (blockId != 0) {
+                // Hit a non-water, non-air block
+                break;
+            } else {
+                // Hit air, no longer underwater
+                break;
+            }
+        }
+
+        return depth;
     }
 
     public byte getSkyLight(int x, int y, int z) {
@@ -372,14 +411,16 @@ public class Chunk {
                     int globalZ = chunkZ*DEPTH + z;
 
                     int aboveId = world.getBlockAt(globalX,y+1,globalZ);
+                    Block aboveBlock = BlockManager.Get().GetBlock(aboveId);
 
-                    if(aboveId!=0) continue;
+                    // Only render water surface if air above, or if above block is transparent (not liquid/solid)
+                    if(aboveBlock != null && aboveBlock.type == BlockType.LIQUID) continue;
 
                     float[][] face = {
-                            {x,y+1,z+1},
-                            {x+1,y+1,z+1},
-                            {x+1,y+1,z},
-                            {x,y+1,z}
+                            {x,y+0.9f,z+1},
+                            {x+1,y+0.9f,z+1},
+                            {x+1,y+0.9f,z},
+                            {x,y+0.9f,z}
                     };
 
                     addFace(verts,idx,face,b.tex_top,atlasSize,texSize,vertCount,x,y,z,new int[]{0,1,0});

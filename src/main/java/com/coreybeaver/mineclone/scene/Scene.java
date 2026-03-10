@@ -101,7 +101,6 @@ public class Scene {
 
         for (Mesh mesh : meshLists.waters) {
             VertexArray vao = mesh.getVao();
-            vao.position.min(new Vector3f(0.0f, -0.3f, 0.0f));
             Matrix4f mvp = new Matrix4f(camera.getProjection()).mul(camera.getView()).mul(vao.getModelMatrix());
             mesh.Draw(waterShader, mvp);
         }

@@ -355,26 +355,29 @@ public class World {
         Chunk chunk = columns.get(pos);
         if (chunk == null) return;
 
-        // Find all surface blocks (blocks with only air above them)
+        // Find all surface blocks (any non-air block with only air above them)
         for (int x = 0; x < Chunk.WIDTH; x++) {
             for (int z = 0; z < Chunk.DEPTH; z++) {
                 // Find the highest non-air block in this column
                 for (int y = Chunk.HEIGHT - 1; y >= 0; y--) {
                     int blockId = chunk.getBlock(x, y, z);
-                    Block block = BlockManager.Get().GetBlock(blockId);
 
-                    // Skip air and non-solid blocks
-                    if (blockId == 0 || (block != null && block.type != BlockType.SOLID)) {
+                    // Skip air blocks
+                    if (blockId == 0) {
                         continue;
                     }
 
-                    // Found a solid block - check if there's only air above
+                    Block block = BlockManager.Get().GetBlock(blockId);
+                    if (block == null) {
+                        continue;
+                    }
+
+                    // Found any non-air block - check if there's only air above
                     boolean isSurface = true;
                     for (int checkY = y + 1; checkY < Chunk.HEIGHT; checkY++) {
                         int aboveId = chunk.getBlock(x, checkY, z);
-                        Block aboveBlock = BlockManager.Get().GetBlock(aboveId);
-                        // If there's any solid block above, this isn't a surface block
-                        if (aboveBlock != null && aboveBlock.type == BlockType.SOLID) {
+                        if (aboveId != 0) {
+                            // There's a non-air block above, not a surface
                             isSurface = false;
                             break;
                         }
@@ -387,7 +390,7 @@ public class World {
                         propagateSkyLight(worldX, y, worldZ, 15);
                     }
 
-                    // Only check the highest solid block in each column
+                    // Only check the highest non-air block in each column
                     break;
                 }
             }
@@ -452,9 +455,6 @@ public class World {
             affectedChunks.add(colPos);
 
             // Spread to neighbors
-            int nextLevel = level - 1;
-            if (nextLevel <= 0) continue;
-
             for (int[] dir : directions) {
                 int nx = lx + dir[0];
                 int ny = ly + dir[1];
@@ -471,6 +471,16 @@ public class World {
                 int neighborBlockId = neighborChunk.getBlock(localNX, ny, localNZ);
                 Block neighborBlock = BlockManager.Get().GetBlock(neighborBlockId);
                 if (neighborBlock != null && neighborBlock.type == BlockType.SOLID) continue;
+
+                // Calculate light decay based on block type
+                // Water blocks cause extra decay (2 instead of 1)
+                int decay = 1;
+                if (neighborBlock != null && neighborBlock.type == BlockType.LIQUID) {
+                    decay = 2;
+                }
+
+                int nextLevel = level - decay;
+                if (nextLevel <= 0) continue;
 
                 LightNode nextNode = new LightNode(nx, ny, nz, nextLevel);
                 if (!visited.contains(nextNode)) {
