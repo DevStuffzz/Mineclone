@@ -14,6 +14,17 @@ public enum Biome {
     HILLS(88, 20),           // rolling hills
     MOUNTAINS(104, 32);      // high peaks
 
+    /**
+     * Sub‑biomes give visual/functional variety within a main biome.  They
+     * don't affect height, only surface material and later features (trees,
+     * cacti, etc.).
+     */
+    public enum SubBiome {
+        NONE,
+        FOREST,
+        DESERT
+    }
+
     private final int baseHeight;
     private final int variation;
 
@@ -72,6 +83,58 @@ public enum Biome {
         if (height < 0) height = 0;
         if (height >= Chunk.HEIGHT) height = Chunk.HEIGHT - 1;
         return height;
+    }
+
+    /**
+     * Pick a sub-biome based on additional noise.  Only some primary biomes
+     * have meaningful variants; others always return NONE.
+     */
+    public SubBiome getSubBiome(int worldX, int worldZ) {
+        double n = Noise.fbm(worldX * 0.01, worldZ * 0.01, 2, 2.0, 0.5);
+        switch (this) {
+            case PLAINS:
+                if (n < -0.2) return SubBiome.DESERT;
+                if (n > 0.2) return SubBiome.FOREST;
+                return SubBiome.NONE;
+            case HILLS:
+                if (n > 0.3) return SubBiome.FOREST;
+                return SubBiome.NONE;
+            default:
+                return SubBiome.NONE;
+        }
+    }
+
+    /**
+     * Return the block ID that should be placed on the surface for this biome
+     * (taking sub-biome into account).  Uses BlockManager, so callers should
+     * be in a context where it has been initialized.
+     */
+    public int surfaceTopBlock(int worldX, int worldZ) {
+        BlockManager bm = BlockManager.Get();
+        switch (this) {
+            case PLAINS: {
+                SubBiome sb = getSubBiome(worldX, worldZ);
+                switch (sb) {
+                    case DESERT: return bm.getIdByName("sand");
+                    case FOREST:
+                    case NONE:
+                    default: return bm.getIdByName("grass_block");
+                }
+            }
+            case HILLS: {
+                SubBiome sb = getSubBiome(worldX, worldZ);
+                if (sb == SubBiome.FOREST) {
+                    return bm.getIdByName("grass_block");
+                }
+                return bm.getIdByName("grass_block");
+            }
+            case SHALLOW_OCEAN:
+            case DEEP_OCEAN:
+                return bm.getIdByName("sand");
+            case MOUNTAINS:
+            default:
+                return bm.getIdByName("stone");
+        }
     }
 
     private static double lerp(double a, double b, double t) {

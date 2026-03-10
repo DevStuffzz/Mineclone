@@ -39,7 +39,7 @@ public class World {
      */
     public Chunk getColumn(int cx, int cz) {
         ColumnPos pos = new ColumnPos(cx, cz);
-        return columns.computeIfAbsent(pos, p -> ChunkGenerator.GenChunkOverworld(cx, cz));
+        return columns.computeIfAbsent(pos, p -> ChunkGenerator.GenChunkOverworld(this, cx, cz));
     }
 
     /**
@@ -86,7 +86,7 @@ public class World {
         if (!pending.isEmpty()) {
             ColumnPos next = pending.poll();
             pendingSet.remove(next);
-            Chunk chunk = ChunkGenerator.GenChunkOverworld(next.x, next.z);
+            Chunk chunk = ChunkGenerator.GenChunkOverworld(this, next.x, next.z);
             columns.put(next, chunk);
         }
 
@@ -100,27 +100,199 @@ public class World {
         }
     }
 
+    public void propagateBlockLight(int worldX, int y, int worldZ, int initialLight) {
+        if (initialLight <= 0) return;
+
+        System.out.println("=== STARTING LIGHT PROPAGATION ===");
+        System.out.println("Start pos: " + worldX + "," + y + "," + worldZ + " with light level " + initialLight);
+
+        Set<ColumnPos> affectedChunks = new HashSet<>();
+
+        // Simple BFS queue
+        class LightNode {
+            final int x, y, z;
+            final int light;
+            LightNode(int x, int y, int z, int light) {
+                this.x = x; this.y = y; this.z = z; this.light = light;
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (!(o instanceof LightNode)) return false;
+                LightNode n = (LightNode) o;
+                return x == n.x && y == n.y && z == n.z;
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(x, y, z);
+            }
+        }
+
+        Queue<LightNode> queue = new ArrayDeque<>();
+        Set<LightNode> visited = new HashSet<>();
+
+        LightNode start = new LightNode(worldX, y, worldZ, initialLight);
+        queue.add(start);
+        visited.add(start);
+
+        // Directions: +X, -X, +Y, -Y, +Z, -Z
+        int[][] directions = {
+                {1, 0, 0}, {-1, 0, 0},
+                {0, 1, 0}, {0, -1, 0},
+                {0, 0, 1}, {0, 0, -1}
+        };
+
+        int processedNodes = 0;
+        while (!queue.isEmpty()) {
+            processedNodes++;
+            LightNode node = queue.poll();
+            int lx = node.x, ly = node.y, lz = node.z;
+            int level = node.light;
+
+            if (ly < 0 || ly >= Chunk.HEIGHT) continue;
+
+            int cx = Math.floorDiv(lx, Chunk.WIDTH);
+            int cz = Math.floorDiv(lz, Chunk.DEPTH);
+            int localX = lx - cx * Chunk.WIDTH;
+            int localZ = lz - cz * Chunk.DEPTH;
+
+            ColumnPos colPos = new ColumnPos(cx, cz);
+            Chunk chunk = columns.get(colPos);
+            if (chunk == null) {
+                if (processedNodes < 5) System.out.println("  Chunk null at " + cx + "," + cz);
+                continue;
+            }
+
+            int currentLight = chunk.getBlockLight(localX, ly, localZ) & 0xFF;
+            if (currentLight >= level) {
+                if (processedNodes < 5) System.out.println("  Already lit at " + lx + "," + ly + "," + lz + " (current=" + currentLight + ", new=" + level + ")");
+                continue;
+            }
+
+            chunk.setBlockLight(localX, ly, localZ, (byte) level);
+            affectedChunks.add(colPos);
+            if (processedNodes < 5) System.out.println("  Set light at " + lx + "," + ly + "," + lz + " to " + level);
+
+            // Spread to neighbors
+            int nextLevel = level - 1;
+            if (nextLevel <= 0) continue;
+
+            for (int[] dir : directions) {
+                int nx = lx + dir[0];
+                int ny = ly + dir[1];
+                int nz = lz + dir[2];
+
+                int ncx = Math.floorDiv(nx, Chunk.WIDTH);
+                int ncz = Math.floorDiv(nz, Chunk.DEPTH);
+                Chunk neighborChunk = columns.get(new ColumnPos(ncx, ncz));
+                if (neighborChunk == null) continue;
+
+                int localNX = nx - ncx * Chunk.WIDTH;
+                int localNZ = nz - ncz * Chunk.DEPTH;
+
+                int neighborBlockId = neighborChunk.getBlock(localNX, ny, localNZ);
+                Block neighborBlock = BlockManager.Get().GetBlock(neighborBlockId);
+                if (neighborBlock != null && neighborBlock.type == BlockType.SOLID) continue;
+
+                LightNode nextNode = new LightNode(nx, ny, nz, nextLevel);
+                if (!visited.contains(nextNode)) {
+                    queue.add(nextNode);
+                    visited.add(nextNode);
+                }
+            }
+        }
+
+        System.out.println("Processed " + processedNodes + " nodes, affected " + affectedChunks.size() + " chunks");
+
+        // Rebuild meshes for all affected chunks immediately
+        for (ColumnPos pos : affectedChunks) {
+            Chunk chunk = columns.get(pos);
+            if (chunk != null) {
+                // Force mesh rebuild with new lighting
+                chunk.invalidateMeshes();
+            }
+        }
+        System.out.println("=== LIGHT PROPAGATION COMPLETE ===\n");
+    }
+
+
+    public byte getSkyLightAt(int worldX, int y, int worldZ) {
+        int cx = (int)Math.floor((double)worldX / Chunk.WIDTH);
+        int cz = (int)Math.floor((double)worldZ / Chunk.DEPTH);
+
+        ColumnPos pos = new ColumnPos(cx, cz);
+        Chunk c = columns.get(pos);
+
+        if(c == null) return 0;
+
+        int lx = worldX - cx * Chunk.WIDTH;
+        int lz = worldZ - cz * Chunk.DEPTH;
+
+        return c.getSkyLight(lx, y, lz);
+    }
+
+    public byte getBlockLightAt(int worldX, int y, int worldZ) {
+        int cx = (int)Math.floor((double)worldX / Chunk.WIDTH);
+        int cz = (int)Math.floor((double)worldZ / Chunk.DEPTH);
+
+        ColumnPos pos = new ColumnPos(cx, cz);
+        Chunk c = columns.get(pos);
+
+        if(c == null) return 0;
+
+        int lx = worldX - cx * Chunk.WIDTH;
+        int lz = worldZ - cz * Chunk.DEPTH;
+
+        return c.getBlockLight(lx, y, lz);
+    }
+
     public MeshLists getMeshes(Texture atlas) {
         MeshLists lists = new MeshLists();
-        // generate/collect solid meshes first
+
+        // SOLID BLOCKS
         for (Map.Entry<ColumnPos, Chunk> entry : columns.entrySet()) {
             ColumnPos pos = entry.getKey();
             Chunk column = entry.getValue();
+
             if (column.getSolidMesh() == null) {
                 column.generateSolidMesh(atlas, this, pos.x, pos.z);
             }
+
             lists.solids.add(column.getSolidMesh());
         }
-        // then generate/append water meshes so they render on top (for blending)
+
+        // WATER (render after solids for blending)
         for (Map.Entry<ColumnPos, Chunk> entry : columns.entrySet()) {
             ColumnPos pos = entry.getKey();
             Chunk column = entry.getValue();
+
             if (column.getWaterMesh() == null) {
                 column.generateWaterMesh(atlas, this, pos.x, pos.z);
             }
+
             Mesh water = column.getWaterMesh();
-            if (water != null) lists.waters.add(water);
+            if (water != null) {
+                lists.waters.add(water);
+            }
         }
+
+        // BILLBOARDS (plants, render after water ideally with blending enabled)
+        for (Map.Entry<ColumnPos, Chunk> entry : columns.entrySet()) {
+            ColumnPos pos = entry.getKey();
+            Chunk column = entry.getValue();
+
+            if (column.getBillboardMesh() == null) {
+                column.generateBillboardMesh(atlas, this, pos.x, pos.z);
+            }
+
+            Mesh billboard = column.getBillboardMesh();
+            if (billboard != null) {
+                lists.billboards.add(billboard);
+            }
+        }
+
         return lists;
     }
 
@@ -151,6 +323,7 @@ public class World {
     public static class MeshLists {
         public final List<Mesh> solids = new ArrayList<>();
         public final List<Mesh> waters = new ArrayList<>();
+        public final List<Mesh> billboards = new ArrayList<>();
     }
 
     private static class ColumnPos {

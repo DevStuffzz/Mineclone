@@ -8,7 +8,10 @@ import org.lwjgl.glfw.GLFWMouseButtonCallback;
 public class Input {
 
     private static boolean[] keys = new boolean[GLFW.GLFW_KEY_LAST];
+    private static boolean[] prevKeys = new boolean[GLFW.GLFW_KEY_LAST];
+
     private static boolean[] buttons = new boolean[GLFW.GLFW_MOUSE_BUTTON_LAST];
+    private static boolean[] prevButtons = new boolean[GLFW.GLFW_MOUSE_BUTTON_LAST];
 
     private static double mouseX;
     private static double mouseY;
@@ -45,16 +48,32 @@ public class Input {
         });
     }
 
-    // -------- KEYBOARD --------
+    /** Call this at the start of each frame to update previous states */
+    public static void update() {
+        System.arraycopy(keys, 0, prevKeys, 0, keys.length);
+        System.arraycopy(buttons, 0, prevButtons, 0, buttons.length);
+    }
 
-    public static boolean isKeyDown(int key) {
+    // -------- KEYBOARD --------
+    /** Returns true while key is held down */
+    public static boolean getKey(int key) {
         return keys[key];
     }
 
-    // -------- MOUSE --------
+    /** Returns true only on the first frame the key is pressed */
+    public static boolean getKeyDown(int key) {
+        return keys[key] && !prevKeys[key];
+    }
 
-    public static boolean isButtonDown(int button) {
+    // -------- MOUSE --------
+    /** Returns true while button is held down */
+    public static boolean getButton(int button) {
         return buttons[button];
+    }
+
+    /** Returns true only on the first frame the button is pressed */
+    public static boolean getButtonDown(int button) {
+        return buttons[button] && !prevButtons[button];
     }
 
     public static double getMouseX() {

@@ -5,23 +5,47 @@ import com.coreybeaver.mineclone.util.AtlasUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
 
 import static org.lwjgl.opengl.GL11.GL_FLOAT;
 
 public class Chunk {
 
     public static final int WIDTH = 16;
-    // vertical size of a single chunk – enlarged so terrain can rise above
-    // the sea level of 64 blocks. 128 gives room for hills and mountains.
     public static final int HEIGHT = 128;
     public static final int DEPTH = 16;
 
     private int[][][] blocks;
+    private byte[][][] blockLight;  // Light from light-emitting blocks
+    private byte[][][] skyLight;    // Light from sky
     private Mesh solidMesh;
     private Mesh waterMesh;
+    private Mesh billboardMesh;
 
-    // world-space position of this chunk (in block units)
+    private World world = null;
+
     private float posX = 0, posY = 0, posZ = 0;
+
+    public Chunk() {
+        blocks = new int[WIDTH][HEIGHT][DEPTH];
+        blockLight = new byte[WIDTH][HEIGHT][DEPTH];
+        skyLight = new byte[WIDTH][HEIGHT][DEPTH];
+
+        // Initialize all light to 0
+        for (int x = 0; x < WIDTH; x++) {
+            for (int y = 0; y < HEIGHT; y++) {
+                for (int z = 0; z < DEPTH; z++) {
+                    blocks[x][y][z] = 0;
+                    blockLight[x][y][z] = 0;
+                    skyLight[x][y][z] = 0;
+                }
+            }
+        }
+    }
+
+    public void SetWorld(World world) {
+        this.world = world;
+    }
 
     public void setPosition(float x, float y, float z) {
         posX = x;
@@ -33,49 +57,185 @@ public class Chunk {
     public float getPosY() { return posY; }
     public float getPosZ() { return posZ; }
 
-    // helper to expose block contents for post-generation modifications
     public int getBlock(int x, int y, int z) {
         if (inBounds(x, y, z)) return blocks[x][y][z];
         return 0;
     }
 
-    public Chunk() {
-        blocks = new int[WIDTH][HEIGHT][DEPTH];
-        // initialize all blocks to air (id 0)
-        for (int x = 0; x < WIDTH; x++)
-            for (int y = 0; y < HEIGHT; y++)
-                for (int z = 0; z < DEPTH; z++)
-                    blocks[x][y][z] = 0;
-    }
-
     public void setBlock(int x, int y, int z, int blockId) {
-        if (inBounds(x, y, z)) blocks[x][y][z] = blockId;
+        if (!inBounds(x, y, z)) return;
+        blocks[x][y][z] = blockId;
     }
 
-    private boolean inBounds(int x, int y, int z) {
-        return x >= 0 && x < WIDTH &&
-                y >= 0 && y < HEIGHT &&
-                z >= 0 && z < DEPTH;
+    // Function ran right after chunk generation
+    public void PostGeneration(int chunkX, int chunkZ) {
+        // Set all blocks to 0, except light-emitting blocks
+        int lightSourceCount = 0;
+        List<int[]> lightSources = new ArrayList<>();
+
+        for(int x = 0; x < WIDTH; x++) {
+            for(int y = 0; y < HEIGHT; y++) {
+                for(int z = 0; z < DEPTH; z++) {
+                    int blockId = blocks[x][y][z];
+                    Block block = BlockManager.Get().GetBlock(blockId);
+
+                    if (block != null && block.light) {
+                        // Light source - set to max
+                        blockLight[x][y][z] = 15;
+                        lightSourceCount++;
+                        lightSources.add(new int[]{x, y, z});
+                        System.out.println("Found light source at chunk-local " + x + "," + y + "," + z + " (block ID " + blockId + ")");
+                    } else {
+                        // Not a light source - set to 0
+                        blockLight[x][y][z] = 0;
+                    }
+                }
+            }
+        }
+
+        if (lightSourceCount > 0) {
+            System.out.println("Chunk " + chunkX + "," + chunkZ + " has " + lightSourceCount + " light sources. Propagating...");
+
+            // Propagate light from each source (within chunk only)
+            for (int[] source : lightSources) {
+                propagateLightInChunk(source[0], source[1], source[2], 15);
+            }
+
+            System.out.println("Light propagation complete for chunk " + chunkX + "," + chunkZ);
+        }
     }
 
-    public Mesh getSolidMesh() {
-        return solidMesh;
+    // Propagate light within this chunk only using BFS
+    private void propagateLightInChunk(int startX, int startY, int startZ, int startLight) {
+        class LightNode {
+            int x, y, z, light;
+            LightNode(int x, int y, int z, int light) {
+                this.x = x; this.y = y; this.z = z; this.light = light;
+            }
+        }
+
+        Queue<LightNode> queue = new java.util.ArrayDeque<>();
+        boolean[][][] visited = new boolean[WIDTH][HEIGHT][DEPTH];
+
+        queue.add(new LightNode(startX, startY, startZ, startLight));
+        visited[startX][startY][startZ] = true;
+
+        int[][] directions = {
+            {1, 0, 0}, {-1, 0, 0},
+            {0, 1, 0}, {0, -1, 0},
+            {0, 0, 1}, {0, 0, -1}
+        };
+
+        int propagated = 0;
+        while (!queue.isEmpty()) {
+            LightNode node = queue.poll();
+
+            // Spread to neighbors
+            int nextLight = node.light - 1;
+            if (nextLight <= 0) continue;
+
+            for (int[] dir : directions) {
+                int nx = node.x + dir[0];
+                int ny = node.y + dir[1];
+                int nz = node.z + dir[2];
+
+                // Check bounds (stay within chunk)
+                if (!inBounds(nx, ny, nz)) continue;
+
+                // Check if already visited
+                if (visited[nx][ny][nz]) continue;
+
+                // Check if neighbor is solid (blocks light)
+                int neighborId = blocks[nx][ny][nz];
+                Block neighborBlock = BlockManager.Get().GetBlock(neighborId);
+                if (neighborBlock != null && neighborBlock.type == BlockType.SOLID) continue;
+
+                // Check if current light is better
+                int currentLight = blockLight[nx][ny][nz] & 0xFF;
+                if (currentLight >= nextLight) continue;
+
+                // Set light and add to queue
+                blockLight[nx][ny][nz] = (byte) nextLight;
+                visited[nx][ny][nz] = true;
+                queue.add(new LightNode(nx, ny, nz, nextLight));
+                propagated++;
+            }
+        }
+
+        System.out.println("  Propagated light to " + propagated + " blocks from " + startX + "," + startY + "," + startZ);
     }
 
-    public Mesh getWaterMesh() {
-        return waterMesh;
+
+    public boolean inBounds(int x, int y, int z) {
+        return x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT && z >= 0 && z < DEPTH;
     }
 
-    /**
-     * Generate only the solid (non-liquid) mesh.
-     */
-    /**
-     * Generate the solid mesh for this chunk, culling faces against neighbours
-     * both inside this chunk and in neighbouring chunks.  The world and the
-     * chunk's X/Z coordinates in chunk-space are required in order to query
-     * adjacent blocks across chunk boundaries.
-     */
+    public Mesh getSolidMesh() { return solidMesh; }
+    public Mesh getWaterMesh() { return waterMesh; }
+    public Mesh getBillboardMesh() { return billboardMesh; }
+
+    public void invalidateMeshes() {
+        solidMesh = null;
+        waterMesh = null;
+        billboardMesh = null;
+    }
+
+
+    // Calculate lighting for a face by sampling the neighbor's light OR current block
+    private float calculateFaceLighting(int x, int y, int z, int[] offset) {
+        int nx = x + offset[0];
+        int ny = y + offset[1];
+        int nz = z + offset[2];
+
+        int neighborLight = 0;
+        int currentLight = blockLight[x][y][z] & 0xFF; // Sample current block's light
+
+        // If neighbor is in bounds, sample directly from chunk
+        if (inBounds(nx, ny, nz)) {
+            neighborLight = blockLight[nx][ny][nz] & 0xFF;
+        } else {
+            // Neighbor is out of chunk bounds, query world
+            int worldX = (int)posX + x + offset[0];
+            int worldY = y + offset[1];
+            int worldZ = (int)posZ + z + offset[2];
+
+            if (world != null) {
+                neighborLight = world.getBlockLightAt(worldX, worldY, worldZ) & 0xFF;
+            }
+        }
+
+        // Take the max of current block and neighbor
+        int lightLevel = Math.max(currentLight, neighborLight);
+
+        // Normalize to 0.0-1.0, no ambient
+        return lightLevel / 15.0f;
+    }
+
+    public byte getSkyLight(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return 0;
+        return skyLight[x][y][z];
+    }
+
+    public void setSkyLight(int x, int y, int z, byte level) {
+        if (!inBounds(x, y, z)) return;
+        skyLight[x][y][z] = level;
+    }
+
+    public byte getBlockLight(int x, int y, int z) {
+        if (!inBounds(x, y, z)) return 0;
+        return blockLight[x][y][z];
+    }
+
+    public void setBlockLight(int x, int y, int z, byte level) {
+        if (!inBounds(x, y, z)) return;
+        blockLight[x][y][z] = level;
+    }
+
+    // -------------------------------------------------
+    // SOLID MESH
+    // -------------------------------------------------
     public void generateSolidMesh(Texture atlasTexture, World world, int chunkX, int chunkZ) {
+
         List<Float> verts = new ArrayList<>();
         List<Integer> idx = new ArrayList<>();
         int vertCount = 0;
@@ -86,48 +246,56 @@ public class Chunk {
         for (int x = 0; x < WIDTH; x++) {
             for (int y = 0; y < HEIGHT; y++) {
                 for (int z = 0; z < DEPTH; z++) {
+
                     int blockId = blocks[x][y][z];
                     Block block = BlockManager.Get().GetBlock(blockId);
-                    boolean isSolid = block != null && block.type == BlockType.SOLID;
-                    if (!isSolid) continue;
+                    if (block == null) continue;
+
+                    if (block.type != BlockType.SOLID) continue;
 
                     float[][][] faces = new float[][][]{
-                            {{x, y, z+1}, {x+1, y, z+1}, {x+1, y+1, z+1}, {x, y+1, z+1}},
-                            {{x+1, y, z}, {x, y, z}, {x, y+1, z}, {x+1, y+1, z}},
-                            {{x, y+1, z+1}, {x+1, y+1, z+1}, {x+1, y+1, z}, {x, y+1, z}},
-                            {{x, y, z}, {x+1, y, z}, {x+1, y, z+1}, {x, y, z+1}},
-                            {{x+1, y, z+1}, {x+1, y, z}, {x+1, y+1, z}, {x+1, y+1, z+1}},
-                            {{x, y, z}, {x, y, z+1}, {x, y+1, z+1}, {x, y+1, z}}
+                            {{x,y,z+1},{x+1,y,z+1},{x+1,y+1,z+1},{x,y+1,z+1}},
+                            {{x+1,y,z},{x,y,z},{x,y+1,z},{x+1,y+1,z}},
+                            {{x,y+1,z+1},{x+1,y+1,z+1},{x+1,y+1,z},{x,y+1,z}},
+                            {{x,y,z},{x+1,y,z},{x+1,y,z+1},{x,y,z+1}},
+                            {{x+1,y,z+1},{x+1,y,z},{x+1,y+1,z},{x+1,y+1,z+1}},
+                            {{x,y,z},{x,y,z+1},{x,y+1,z+1},{x,y+1,z}}
                     };
 
                     int[] texIndices = {
-                            block.tex_sides, block.tex_sides, block.tex_top, block.tex_bottom, block.tex_sides, block.tex_sides
+                            block.tex_sides,
+                            block.tex_sides,
+                            block.tex_top,
+                            block.tex_bottom,
+                            block.tex_sides,
+                            block.tex_sides
                     };
 
                     int[][] neighborOffsets = {
                             {0,0,1},{0,0,-1},{0,1,0},{0,-1,0},{1,0,0},{-1,0,0}
                     };
 
-                    // compute global coordinates of current block
                     int globalX = chunkX * WIDTH + x;
                     int globalZ = chunkZ * DEPTH + z;
 
                     for (int f = 0; f < 6; f++) {
+
                         int ngx = globalX + neighborOffsets[f][0];
                         int ngy = y + neighborOffsets[f][1];
                         int ngz = globalZ + neighborOffsets[f][2];
 
                         int neighborId = world.getBlockAt(ngx, ngy, ngz);
-                        boolean neighborEmpty = neighborId == 0;
-                        if (!neighborEmpty) {
+
+                        boolean neighborEmpty = true;
+
+                        if (neighborId != 0) {
                             Block n = BlockManager.Get().GetBlock(neighborId);
-                            if (n != null && n.type == BlockType.LIQUID) {
-                                neighborEmpty = true;
-                            }
+                            if (n != null && n.type == BlockType.SOLID)
+                                neighborEmpty = false;
                         }
 
                         if (neighborEmpty) {
-                            addFace(verts, idx, faces[f], texIndices[f], atlasSize, texSize, vertCount);
+                            addFace(verts, idx, faces[f], texIndices[f], atlasSize, texSize, vertCount, x, y, z, neighborOffsets[f]);
                             vertCount += 4;
                         }
                     }
@@ -137,39 +305,44 @@ public class Chunk {
 
         float[] array = new float[verts.size()];
         for (int i = 0; i < verts.size(); i++) array[i] = verts.get(i);
+
         int[] idxArray = new int[idx.size()];
         for (int i = 0; i < idx.size(); i++) idxArray[i] = idx.get(i);
 
         BufferLayoutElement[] layout = new BufferLayoutElement[]{
                 new BufferLayoutElement(GL_FLOAT,3,false),
-                new BufferLayoutElement(GL_FLOAT,2,false)
+                new BufferLayoutElement(GL_FLOAT,2,false),
+                new BufferLayoutElement(GL_FLOAT,1,false)
         };
 
         VertexArray vao = new VertexArray(array, idxArray, layout);
-        vao.getPosition().set(posX, posY, posZ);
+        vao.getPosition().set(posX,posY,posZ);
+
         solidMesh = new Mesh(vao, atlasTexture);
     }
 
-    private void addFace(List<Float> vertices, List<Integer> indices, float[][] positions, int texIndex, int atlasSize, float texSize, int vertexOffset) {
-        // sanity check – texture index should be valid, otherwise we'll sample the wrong cell
-        if (texIndex < 0 || texIndex >= atlasSize * atlasSize) {
-            System.err.println("Warning: texture index " + texIndex + " out of bounds (atlasSize=" + atlasSize + ")");
-            texIndex = 0;
-        }
+    private void addFace(List<Float> vertices, List<Integer> indices,
+                         float[][] positions, int texIndex,
+                         int atlasSize, float texSize,
+                         int vertexOffset, int x, int y, int z, int[] faceOffset) {
 
-        // compute UV coordinates using the shared utility so the calculation is in one place
         float[] uvs = AtlasUtils.getUVs(texIndex, atlasSize, texSize);
 
-        // each face contributes 4 vertices: position + uv
+        // Sample light from the neighboring block (where the face points)
+        float light = calculateFaceLighting(x, y, z, faceOffset);
+
         for (int i = 0; i < 4; i++) {
+
             vertices.add(positions[i][0]);
             vertices.add(positions[i][1]);
             vertices.add(positions[i][2]);
-            vertices.add(uvs[i * 2]);      // u
-            vertices.add(uvs[i * 2 + 1]);  // v
+
+            vertices.add(uvs[i*2]);
+            vertices.add(uvs[i*2+1]);
+
+            vertices.add(light);
         }
 
-        // Two triangles
         indices.add(vertexOffset);
         indices.add(vertexOffset+1);
         indices.add(vertexOffset+2);
@@ -179,51 +352,122 @@ public class Chunk {
         indices.add(vertexOffset+3);
     }
 
-    /**
-     * Generate mesh for water blocks. Only the top face of each liquid block
-     * should be rendered (prevents cube look), so we only add a face when the
-     * block is liquid and the block above is empty.
-     */
+    // -------------------------------------------------
+    // WATER MESH
+    // -------------------------------------------------
     public void generateWaterMesh(Texture atlasTexture, World world, int chunkX, int chunkZ) {
+
         List<Float> verts = new ArrayList<>();
         List<Integer> idx = new ArrayList<>();
-        int vertCount = 0;
+        int vertCount=0;
 
         int atlasSize = AtlasUtils.atlasSize(atlasTexture);
-        float texSize = 1.0f / atlasSize;
+        float texSize = 1f/atlasSize;
 
-        for (int x = 0; x < WIDTH; x++) {
-            for (int z = 0; z < DEPTH; z++) {
-                for (int y = 0; y < HEIGHT; y++) {
+        for(int x=0;x<WIDTH;x++)
+            for(int z=0;z<DEPTH;z++)
+                for(int y=0;y<HEIGHT;y++){
+
                     int id = blocks[x][y][z];
                     Block b = BlockManager.Get().GetBlock(id);
-                    if (b == null || b.type != BlockType.LIQUID) continue;
-                    // use world coordinates to check cell above, which may lie in
-                    // an adjacent chunk
-                    int globalX = chunkX * WIDTH + x;
-                    int globalZ = chunkZ * DEPTH + z;
-                    int aboveId = world.getBlockAt(globalX, y+1, globalZ);
-                    if (aboveId != 0) continue; // not air
 
-                    float[][] face = new float[][]{{x, y+1, z+1}, {x+1, y+1, z+1}, {x+1, y+1, z}, {x, y+1, z}};
-                    int tex = b.tex_top;
-                    addFace(verts, idx, face, tex, atlasSize, texSize, vertCount);
-                    vertCount += 4;
+                    if(b==null || b.type!=BlockType.LIQUID) continue;
+
+                    int globalX = chunkX*WIDTH + x;
+                    int globalZ = chunkZ*DEPTH + z;
+
+                    int aboveId = world.getBlockAt(globalX,y+1,globalZ);
+
+                    if(aboveId!=0) continue;
+
+                    float[][] face = {
+                            {x,y+1,z+1},
+                            {x+1,y+1,z+1},
+                            {x+1,y+1,z},
+                            {x,y+1,z}
+                    };
+
+                    addFace(verts,idx,face,b.tex_top,atlasSize,texSize,vertCount,x,y,z,new int[]{0,1,0});
+
+                    vertCount+=4;
                 }
-            }
-        }
 
         float[] array = new float[verts.size()];
-        for (int i = 0; i < verts.size(); i++) array[i] = verts.get(i);
-        int[] idxArray = new int[idx.size()];
-        for (int i = 0; i < idx.size(); i++) idxArray[i] = idx.get(i);
+        for(int i=0;i<verts.size();i++) array[i]=verts.get(i);
 
-        BufferLayoutElement[] layout = new BufferLayoutElement[]{
+        int[] idxArray = new int[idx.size()];
+        for(int i=0;i<idx.size();i++) idxArray[i]=idx.get(i);
+
+        BufferLayoutElement[] layout = {
                 new BufferLayoutElement(GL_FLOAT,3,false),
-                new BufferLayoutElement(GL_FLOAT,2,false)
+                new BufferLayoutElement(GL_FLOAT,2,false),
+                new BufferLayoutElement(GL_FLOAT,1,false)
         };
-        VertexArray vao = new VertexArray(array, idxArray, layout);
-        vao.getPosition().set(posX, posY, posZ);
-        waterMesh = new Mesh(vao, atlasTexture);
+
+        VertexArray vao = new VertexArray(array,idxArray,layout);
+        vao.getPosition().set(posX,posY,posZ);
+
+        waterMesh = new Mesh(vao,atlasTexture);
     }
+
+    // -------------------------------------------------
+    // BILLBOARD MESH
+    // -------------------------------------------------
+    public void generateBillboardMesh(Texture atlasTexture, World world, int chunkX, int chunkZ){
+
+        List<Float> verts = new ArrayList<>();
+        List<Integer> idx = new ArrayList<>();
+        int vertCount=0;
+
+        int atlasSize = AtlasUtils.atlasSize(atlasTexture);
+        float texSize = 1f/atlasSize;
+
+        for(int x=0;x<WIDTH;x++)
+            for(int z=0;z<DEPTH;z++)
+                for(int y=0;y<HEIGHT;y++){
+
+                    int id = blocks[x][y][z];
+                    Block b = BlockManager.Get().GetBlock(id);
+
+                    if(b==null || b.type!=BlockType.PLANT) continue;
+
+                    float[][] quad1 = {
+                            {x,y,z},
+                            {x+1,y,z+1},
+                            {x+1,y+1,z+1},
+                            {x,y+1,z}
+                    };
+
+                    float[][] quad2 = {
+                            {x+1,y,z},
+                            {x,y,z+1},
+                            {x,y+1,z+1},
+                            {x+1,y+1,z}
+                    };
+
+                    addFace(verts,idx,quad1,b.tex_top,atlasSize,texSize,vertCount,x,y,z,new int[]{0,0,0});
+                    vertCount+=4;
+
+                    addFace(verts,idx,quad2,b.tex_top,atlasSize,texSize,vertCount,x,y,z,new int[]{0,0,0});
+                    vertCount+=4;
+                }
+
+        float[] array = new float[verts.size()];
+        for(int i=0;i<verts.size();i++) array[i]=verts.get(i);
+
+        int[] idxArray = new int[idx.size()];
+        for(int i=0;i<idx.size();i++) idxArray[i]=idx.get(i);
+
+        BufferLayoutElement[] layout = {
+                new BufferLayoutElement(GL_FLOAT,3,false),
+                new BufferLayoutElement(GL_FLOAT,2,false),
+                new BufferLayoutElement(GL_FLOAT,1,false)
+        };
+
+        VertexArray vao = new VertexArray(array,idxArray,layout);
+        vao.getPosition().set(posX,posY,posZ);
+
+        billboardMesh = new Mesh(vao,atlasTexture);
+    }
+
 }

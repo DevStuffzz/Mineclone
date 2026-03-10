@@ -15,9 +15,9 @@ public class VertexArray {
 
     private int indexCount;
 
-    private Vector3f position = new Vector3f(0,0,0);
-    private Vector3f rotation = new Vector3f(0,0,0);
-    private Vector3f scale = new Vector3f(1,1,1);
+    public Vector3f position = new Vector3f(0,0,0);
+    public Vector3f rotation = new Vector3f(0,0,0);
+    public Vector3f scale = new Vector3f(1,1,1);
 
     public VertexArray(float[] vertices,
                        int[] indices,

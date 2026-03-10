@@ -18,6 +18,12 @@ public class BlockManager {
         numBlocks ++;
     }
 
+    public void AddBlock(BlockType type, int tex_top, int tex_sides, int tex_bottom, String name, boolean light) {
+        blocks.put(numBlocks, new Block(numBlocks, type, tex_top, tex_sides, tex_bottom, name, light));
+
+        numBlocks ++;
+    }
+
     public static BlockManager Get() {
         if(instance == null) {
             instance = new BlockManager();

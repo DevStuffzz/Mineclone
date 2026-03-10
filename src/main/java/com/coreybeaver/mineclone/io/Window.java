@@ -1,5 +1,7 @@
 package com.coreybeaver.mineclone.io;
 
+import com.coreybeaver.mineclone.Game;
+import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
 
@@ -43,11 +45,17 @@ public class Window {
         glfwWindowHint(GLFW_MAXIMIZED, GLFW_FALSE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
+
         glfwMakeContextCurrent(glfwWindow);
         GL.createCapabilities();
         // enable depth testing (was mistakenly using the clear mask)
         GL11.glEnable(GL11.GL_DEPTH_TEST);
         Input.init(glfwWindow);
+
+        glfwSetWindowSizeCallback(glfwWindow, (win, width, height) -> {
+            GL11.glViewport(0, 0, width, height);
+            Game.GetMainFramebuffer().resize(width, height);
+        });
 
         glfwShowWindow(glfwWindow);
     }
@@ -55,6 +63,25 @@ public class Window {
     public void Update() {
         glfwPollEvents();
         glfwSwapBuffers(glfwWindow);
+    }
+
+    public void ToggleFullscreen() {
+        long monitor = glfwGetWindowMonitor(glfwWindow);
+
+        if (monitor == NULL) {
+            // Switch to borderless fullscreen
+            long primaryMonitor = glfwGetPrimaryMonitor();
+            GLFWVidMode vidMode = glfwGetVideoMode(primaryMonitor);
+            if (vidMode != null) {
+                glfwSetWindowAttrib(glfwWindow, GLFW_DECORATED, GLFW_FALSE);
+                glfwSetWindowMonitor(glfwWindow, primaryMonitor, 0, 0,
+                        vidMode.width(), vidMode.height(), vidMode.refreshRate());
+            }
+        } else {
+            // Switch back to windowed mode (restore previous size)
+            glfwSetWindowMonitor(glfwWindow, NULL, 100, 100, width, height, 0);
+            glfwSetWindowAttrib(glfwWindow, GLFW_DECORATED, GLFW_TRUE);
+        }
     }
 
     public void Destroy() {

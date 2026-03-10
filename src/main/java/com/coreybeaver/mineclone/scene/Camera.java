@@ -29,6 +29,24 @@ public class Camera {
         position.set(x, y, z);
     }
 
+    public Matrix4f getViewProjection() {
+        updateView(); // ensure the view matrix is up-to-date
+        return new Matrix4f(projection).mul(view);
+    }
+
+    public Matrix4f getViewProjectionNoTranslation() {
+        updateView();
+
+        // Copy the view matrix
+        Matrix4f viewNoTranslation = new Matrix4f(view);
+
+        // Zero out translation
+        viewNoTranslation.m30(0f).m31(0f).m32(0f);
+
+        // Multiply by projection
+        return new Matrix4f(projection).mul(viewNoTranslation);
+    }
+
     // Points the camera at a target in world space
     public void lookAt(float targetX, float targetY, float targetZ) {
         Vector3f dir = new Vector3f(targetX, targetY, targetZ).sub(position).normalize();
@@ -56,23 +74,23 @@ public class Camera {
 
     public void Update(float deltaTime) {
 
-        float moveSpeed = 5.0f * deltaTime;
+        float moveSpeed = 10.0f * deltaTime;
         float lookSpeed = -2.5f * deltaTime;
 
         // =========================
         // ROTATION (Arrow Keys)
         // =========================
 
-        if (Input.isKeyDown(GLFW_KEY_UP))
+        if (Input.getKey(GLFW_KEY_UP))
             rotation.x -= lookSpeed;
 
-        if (Input.isKeyDown(GLFW_KEY_DOWN))
+        if (Input.getKey(GLFW_KEY_DOWN))
             rotation.x += lookSpeed;
 
-        if (Input.isKeyDown(GLFW_KEY_LEFT))
+        if (Input.getKey(GLFW_KEY_LEFT))
             rotation.y -= lookSpeed;
 
-        if (Input.isKeyDown(GLFW_KEY_RIGHT))
+        if (Input.getKey(GLFW_KEY_RIGHT))
             rotation.y += lookSpeed;
 
         // Clamp pitch to avoid flipping
@@ -100,16 +118,16 @@ public class Camera {
         // MOVEMENT (WASD)
         // =========================
 
-        if (Input.isKeyDown(GLFW_KEY_W))
+        if (Input.getKey(GLFW_KEY_W))
             position.add(new Vector3f(forward).mul(moveSpeed));
 
-        if (Input.isKeyDown(GLFW_KEY_S))
+        if (Input.getKey(GLFW_KEY_S))
             position.sub(new Vector3f(forward).mul(moveSpeed));
 
-        if (Input.isKeyDown(GLFW_KEY_D))
+        if (Input.getKey(GLFW_KEY_D))
             position.add(new Vector3f(right).mul(moveSpeed));
 
-        if (Input.isKeyDown(GLFW_KEY_A))
+        if (Input.getKey(GLFW_KEY_A))
             position.sub(new Vector3f(right).mul(moveSpeed));
     }
 

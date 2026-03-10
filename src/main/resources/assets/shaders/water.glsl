@@ -1,13 +1,25 @@
 #type vertex
 #version 330 core
+
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec2 a_TexCoord;
+
 out vec2 v_TexCoord;
 
 uniform mat4 u_MVP;
+uniform float u_Time;
 
-void main() {
-    v_TexCoord = a_TexCoord;
+void main()
+{
+    float speed = 2.0;        // how fast it switches
+    float tileSize = 0.0625;  // one tile in a 16x16 atlas
+
+    int frame = int(floor(u_Time * speed)) % 2;
+
+    float offsetX = frame * tileSize;
+
+    v_TexCoord = a_TexCoord + vec2(offsetX, 0.0);
+
     gl_Position = u_MVP * vec4(a_Position, 1.0);
 }
 
@@ -22,4 +34,5 @@ void main() {
     vec4 col = texture(u_Texture, v_TexCoord);
     // subtle blue tint and slight transparency for water
     FragColor = col * vec4(0.5, 0.7, 1.0, 0.8);
+    FragColor = col;
 }
