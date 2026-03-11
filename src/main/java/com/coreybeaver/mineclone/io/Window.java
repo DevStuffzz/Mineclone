@@ -36,29 +36,36 @@ public class Window {
     public void Init() throws IllegalAccessException {
         if(!glfwInit()) throw new IllegalAccessException("GLFW Failed to Initialize");
 
-        glfwWindow = glfwCreateWindow(width, height, title, NULL, NULL);
-
-        if(glfwWindow == NULL) throw new IllegalAccessException("GLFW Window failed to create");
-
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
         glfwWindowHint(GLFW_MAXIMIZED, GLFW_FALSE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+
+        glfwWindow = glfwCreateWindow(width, height, title, NULL, NULL);
+
+        if(glfwWindow == NULL) throw new IllegalAccessException("GLFW Window failed to create");
 
         glfwMakeContextCurrent(glfwWindow);
+        glfwSwapInterval(1);
+
         GL.createCapabilities();
-        // enable depth testing (was mistakenly using the clear mask)
+
         GL11.glEnable(GL11.GL_DEPTH_TEST);
 
-        // Capture and hide cursor for mouse look
         glfwSetInputMode(glfwWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
         Input.init(glfwWindow);
 
         glfwSetWindowSizeCallback(glfwWindow, (win, width, height) -> {
             GL11.glViewport(0, 0, width, height);
-            Game.GetMainFramebuffer().resize(width, height);
+            if (Game.GetMainFramebuffer() != null) {
+                Game.GetMainFramebuffer().resize(width, height);
+            }
         });
 
         glfwShowWindow(glfwWindow);
@@ -90,6 +97,7 @@ public class Window {
 
     public void Destroy() {
         glfwDestroyWindow(glfwWindow);
+        glfwTerminate();
     }
 
     public boolean open() {

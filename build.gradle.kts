@@ -1,5 +1,6 @@
 plugins {
     id("java")
+    id("application")
 }
 
 group = "com.coreybeaver"
@@ -7,7 +8,18 @@ version = "1.0-SNAPSHOT"
 
 val lwjglVersion = "3.4.1"
 val jomlVersion = "1.10.8"
-val lwjglNatives = "natives-windows"
+
+val osName = System.getProperty("os.name").lowercase()
+val osArch = System.getProperty("os.arch").lowercase()
+
+val lwjglNatives = when {
+    osName.contains("win") -> "natives-windows"
+    osName.contains("mac") && osArch.contains("aarch64") -> "natives-macos-arm64"
+    osName.contains("mac") -> "natives-macos"
+    osName.contains("linux") && (osArch.contains("arm") || osArch.contains("aarch64")) -> "natives-linux-arm64"
+    osName.contains("linux") -> "natives-linux"
+    else -> error("Unsupported platform: os=$osName arch=$osArch")
+}
 
 repositories {
     mavenCentral()
@@ -43,4 +55,14 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+application {
+    mainClass.set("com.coreybeaver.mineclone.Main")
+}
+
+tasks.withType<JavaExec>().configureEach {
+    if (osName.contains("mac")) {
+        jvmArgs("-XstartOnFirstThread")
+    }
 }
